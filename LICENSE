@@ -1,10 +1,15 @@
 Copyright (c) 2025-2026 ChainKey. All rights reserved.
 
-This source code is made available for viewing purposes only.
+This source code is publicly available for viewing, learning, and
+personal experimentation.
 
-You may NOT use, copy, modify, merge, publish, distribute, sublicense,
-or sell copies of this software or any portion thereof without explicit
-written permission from the copyright holder.
+You may NOT:
+  - Use this software or derivatives in production or for commercial purposes
+  - Deploy this software or derivatives to any blockchain network
+  - Redistribute modified versions as your own project
+  - Remove or alter this license or copyright notice
+
+without explicit written permission from the copyright holder.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
