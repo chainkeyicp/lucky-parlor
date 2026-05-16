@@ -1,0 +1,78 @@
+type Account = record {
+  owner : principal;
+  subaccount : opt vec nat8;
+};
+
+type TransferArgs = record {
+  from_subaccount : opt vec nat8;
+  to : Account;
+  amount : nat;
+  fee : opt nat;
+  memo : opt vec nat8;
+  created_at_time : opt nat64;
+};
+
+type TransferError = variant {
+  BadFee : record { expected_fee : nat };
+  InsufficientFunds : record { balance : nat };
+  TooOld;
+  CreatedInFuture : record { ledger_time : nat64 };
+  Duplicate : record { duplicate_of : nat };
+  TemporarilyUnavailable;
+  GenericError : record { error_code : nat; message : text };
+};
+
+type MetadataValue = variant {
+  Nat : nat;
+  Int : int;
+  Text : text;
+  Blob : vec nat8;
+};
+
+type SupportedStandard = record {
+  name : text;
+  url : text;
+};
+
+type StakeInfo = record {
+  liquid : nat;
+  staked : nat;
+  unlockable : nat;
+  locked : nat;
+  total : nat;
+  boost_bps : nat64;
+};
+
+type StakeBatchInfo = record {
+  amount : nat;
+  staked_at : nat64;
+  unlocks_at : nat64;
+  unlocked : bool;
+};
+
+service : (principal) -> {
+  icrc1_name : () -> (text) query;
+  icrc1_symbol : () -> (text) query;
+  icrc1_decimals : () -> (nat8) query;
+  icrc1_fee : () -> (nat) query;
+  icrc1_metadata : () -> (vec record { text; MetadataValue }) query;
+  icrc1_supported_standards : () -> (vec SupportedStandard) query;
+  icrc1_total_supply : () -> (nat) query;
+  icrc1_minting_account : () -> (opt Account) query;
+  icrc1_balance_of : (Account) -> (nat) query;
+  icrc1_transfer : (TransferArgs) -> (variant { Ok : nat; Err : TransferError });
+  max_supply : () -> (nat) query;
+  reward_pool : () -> (nat) query;
+  rewards_minted : () -> (nat) query;
+  total_balance_of : (principal) -> (nat) query;
+  staked_balance_of : (principal) -> (nat) query;
+  get_stake_info : (principal) -> (StakeInfo) query;
+  get_stake_batches : (principal) -> (vec StakeBatchInfo) query;
+  get_boost_bps : (principal) -> (nat64) query;
+  get_boost_bps_batch : (vec principal) -> (vec nat64) query;
+  stake : (nat) -> (variant { Ok : StakeInfo; Err : text });
+  unstake : (nat) -> (variant { Ok : StakeInfo; Err : text });
+  set_minting_account : (principal) -> ();
+  mint : (principal, nat) -> (variant { Ok; Err : text });
+  burn : (nat) -> (variant { Ok : nat; Err : TransferError });
+}

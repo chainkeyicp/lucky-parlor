@@ -1,0 +1,43 @@
+{
+  "canisters": {
+    "frontend": {
+      "type": "assets",
+      "source": ["src/frontend"],
+      "dependencies": ["ignis", "lottery", "token", "treasury", "icp_ledger_mock"]
+    },
+    "ignis": {
+      "candid": "src/ignis/ignis.did",
+      "package": "ignis",
+      "type": "rust"
+    },
+    "icp_ledger_mock": {
+      "candid": "src/icp_ledger_mock/icp_ledger_mock.did",
+      "package": "icp_ledger_mock",
+      "type": "rust"
+    },
+    "lottery": {
+      "candid": "src/lottery/lottery.did",
+      "package": "lottery",
+      "type": "rust"
+    },
+    "token": {
+      "candid": "src/token/token.did",
+      "package": "token",
+      "type": "rust"
+    },
+    "treasury": {
+      "candid": "src/treasury/treasury.did",
+      "package": "treasury",
+      "type": "rust"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}
+

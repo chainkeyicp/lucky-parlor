@@ -1,0 +1,85 @@
+type Stage = variant { Spark; Flame; Inferno; Supernova; Singularity };
+type Mood = variant { Dormant; Restless; Curious; Excited; Ecstatic; Wrathful };
+
+type IgnisView = record {
+  stage : Stage;
+  mood : Mood;
+  hunger : nat8;
+  total_burn_e8s : nat64;
+  total_burn_icp : nat64;
+  ignis_wins : nat64;
+  arena_enabled : bool;
+};
+
+type DrawEvent = record {
+  round : nat64;
+  winner : principal;
+  reward_lucky_e8s : nat;
+  active_tickets : nat64;
+  active_players : nat64;
+  winning_weight_bps : nat64;
+  timestamp : nat64;
+  ignis_won : bool;
+};
+
+type DrawCommentary = record {
+  round : nat64;
+  text : text;
+  timestamp : nat64;
+};
+
+type ChronicleEntry = record {
+  chapter : nat64;
+  text : text;
+  timestamp : nat64;
+};
+
+type NotableEvent = record {
+  round : nat64;
+  description : text;
+  timestamp : nat64;
+};
+
+type RememberedPlayer = record {
+  player : principal;
+  wins : nat64;
+  tickets_bought : nat64;
+  last_seen : nat64;
+  nickname : opt text;
+};
+
+type RitualChallenge = variant {
+  Riddle : record { question : text; options : vec text; correct_index : nat8 };
+  Choice : record { prompt : text; options : vec text };
+};
+
+type RitualResult = record {
+  success : bool;
+  boost_bps : nat64;
+  ignis_response : text;
+};
+
+type ConfigureArgs = record {
+  lottery_canister : opt principal;
+  treasury_canister : opt principal;
+};
+
+service : {
+  configure : (ConfigureArgs) -> ();
+  set_arena_enabled : (bool) -> ();
+  on_draw : (DrawEvent) -> (variant { Ok; Err : text });
+  on_burn : (nat64) -> (variant { Ok; Err : text });
+  chat : (text) -> (variant { Ok : text; Err : text });
+  request_ritual : () -> (variant { Ok : RitualChallenge; Err : text });
+  attempt_ritual : (nat8) -> (variant { Ok : RitualResult; Err : text });
+  consume_ritual_boost : (principal) -> (nat64);
+  get_ritual_boost : (principal) -> (nat64) query;
+  get_state : () -> (IgnisView) query;
+  get_commentary : (nat64) -> (opt DrawCommentary) query;
+  get_recent_commentaries : (nat64) -> (vec DrawCommentary) query;
+  get_chronicle : (nat64) -> (vec ChronicleEntry) query;
+  get_notable_events : () -> (vec NotableEvent) query;
+  get_remembered_players : () -> (vec RememberedPlayer) query;
+  get_arena_stats : () -> (nat64, nat) query;
+  is_arena_enabled : () -> (bool) query;
+}

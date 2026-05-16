@@ -1,0 +1,10 @@
+.dfx/
+target/
+.env
+canister_ids.json
+src/frontend/canister-ids.js
+*.wasm
+*.did.d.ts
+*.did.js
+
+.claude/

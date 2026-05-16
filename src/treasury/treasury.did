@@ -1,0 +1,39 @@
+type Account = record {
+  owner : principal;
+  subaccount : opt vec nat8;
+};
+
+type ConfigureArgs = record {
+  lottery_canister : opt principal;
+  icp_ledger : opt principal;
+  dev_account : opt Account;
+  liquidity_account : opt Account;
+  burn_account : opt Account;
+};
+
+type ClaimResult = record {
+  amount_e8s : nat64;
+  dev_e8s : nat64;
+  liquidity_e8s : nat64;
+  burn_e8s : nat64;
+  ledger_fees_e8s : nat64;
+  distribution_complete : bool;
+};
+
+type Stats = record {
+  total_received : nat64;
+  total_dev : nat64;
+  total_liquidity : nat64;
+  total_burn : nat64;
+  claim_count : nat64;
+  pending_distributions : nat64;
+};
+
+service : {
+  configure : (ConfigureArgs) -> ();
+  claim_ticket_payment : (principal, vec nat8, nat64) -> (variant { Ok : ClaimResult; Err : text });
+  retry_pending_distribution : (vec nat8) -> (variant { Ok : bool; Err : text });
+  get_deposit_account : (vec nat8) -> (Account) query;
+  get_stats : () -> (Stats) query;
+  get_split : () -> (nat64, nat64, nat64) query;
+}

@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "src/icp_ledger_mock",
+    "src/ignis",
+    "src/lottery",
+    "src/token",
+    "src/treasury"
+]
+resolver = "2"
+

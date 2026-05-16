@@ -1,0 +1,86 @@
+type Account = record {
+  owner : principal;
+  subaccount : opt vec nat8;
+};
+
+type ConfigureArgs = record {
+  token_canister : opt principal;
+  treasury_canister : opt principal;
+  ignis_canister : opt principal;
+};
+
+type ClaimResult = record {
+  amount_e8s : nat64;
+  dev_e8s : nat64;
+  liquidity_e8s : nat64;
+  burn_e8s : nat64;
+  ledger_fees_e8s : nat64;
+  distribution_complete : bool;
+};
+
+type DrawResult = record {
+  round : nat64;
+  winner : principal;
+  reward_lucky_e8s : nat;
+  active_tickets : nat64;
+  active_players : nat64;
+  winning_weight_bps : nat64;
+  timestamp : nat64;
+  ticket_principals : vec principal;
+  ticket_ids : vec nat64;
+  winning_ticket_id : nat64;
+};
+
+type TicketInfo = record {
+  ticket_id : nat64;
+  purchased_at : nat64;
+  remaining_draws : nat64;
+  total_draws : nat64;
+};
+
+type TicketStatus = record {
+  active_tickets : nat64;
+  min_remaining_draws : opt nat64;
+  boost_bps : nat64;
+  streak_days : nat64;
+  streak_boost_bps : nat64;
+};
+
+type StreakInfo = record {
+  consecutive_days : nat64;
+  streak_boost_bps : nat64;
+  last_purchase_day : nat64;
+  current_day : nat64;
+  streak_alive : bool;
+};
+
+type LotteryStats = record {
+  round : nat64;
+  active_tickets : nat64;
+  active_players : nat64;
+  emitted_today_lucky_e8s : nat;
+  daily_cap_lucky_e8s : nat;
+  total_rewards_minted_lucky_e8s : nat;
+  halving_level : nat64;
+  burn_pool_lucky_e8s : nat;
+  total_burned_lucky_e8s : nat;
+  last_burn_epoch : nat64;
+};
+
+service : {
+  configure : (ConfigureArgs) -> ();
+  get_deposit_subaccount : (principal) -> (vec nat8) query;
+  get_deposit_account : (principal) -> (variant { Ok : Account; Err : text }) query;
+  buy_ticket : (nat64) -> (variant { Ok : ClaimResult; Err : text });
+  admin_run_draw : () -> (variant { Ok : opt DrawResult; Err : text });
+  admin_reset_daily_emission : () -> ();
+  sample_random_blob : () -> (variant { Ok : vec nat8; Err : text });
+  get_active_ticket_count : () -> (nat64) query;
+  get_active_player_count : () -> (nat64) query;
+  get_draw_history : () -> (vec DrawResult) query;
+  get_round : () -> (nat64) query;
+  get_ticket_status : (principal) -> (TicketStatus);
+  get_my_tickets : (principal) -> (vec TicketInfo) query;
+  get_stats : () -> (LotteryStats) query;
+  get_streak_info : (principal) -> (StreakInfo) query;
+}

@@ -1,0 +1,42 @@
+type Account = record {
+  owner : principal;
+  subaccount : opt vec nat8;
+};
+
+type TransferArg = record {
+  from_subaccount : opt vec nat8;
+  to : Account;
+  amount : nat;
+  fee : opt nat;
+  memo : opt vec nat8;
+  created_at_time : opt nat64;
+};
+
+type TransferError = variant {
+  BadFee : record { expected_fee : nat };
+  BadBurn : record { min_burn_amount : nat };
+  InsufficientFunds : record { balance : nat };
+  TooOld;
+  CreatedInFuture : record { ledger_time : nat64 };
+  Duplicate : record { duplicate_of : nat };
+  TemporarilyUnavailable;
+  GenericError : record { error_code : nat; message : text };
+};
+
+type Transfer = record {
+  index : nat;
+  from : Account;
+  to : Account;
+  amount : nat;
+  fee : nat;
+  timestamp : nat64;
+};
+
+service : {
+  faucet : (Account, nat) -> (variant { Ok : nat; Err : text });
+  icrc1_balance_of : (Account) -> (nat) query;
+  icrc1_fee : () -> (nat) query;
+  icrc1_transfer : (TransferArg) -> (variant { Ok : nat; Err : TransferError });
+  get_transactions : () -> (vec Transfer) query;
+}
+
