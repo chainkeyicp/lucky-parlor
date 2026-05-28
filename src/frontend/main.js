@@ -1344,7 +1344,7 @@ async function refreshIgnis() {
       els.parlorIgnisStats.textContent = `${dayMood.emoji} ${dayMood.name} · Hunger ${state.hunger}%`;
     }
 
-    renderCommentaries(commentaries);
+    if (els.ignisCommentaryList) renderCommentaries(commentaries);
   } catch (err) {
     console.warn("ignis refresh failed", err);
   }
@@ -1362,6 +1362,7 @@ async function refreshIgnisCommentaries() {
 
 function renderCommentaries(commentaries) {
   cachedCommentaries = commentaries;
+  if (!els.ignisCommentaryList) return;
   if (!commentaries.length) {
     els.ignisCommentaryList.innerHTML = '<div class="empty">No commentaries yet. IGNIS will speak after the next draw.</div>';
     return;
@@ -1532,7 +1533,7 @@ async function ignisChronicleNav(delta) {
 }
 
 async function refreshIgnisChronicle() {
-  if (!actors?.ignis) return;
+  if (!actors?.ignis || !els.ignisChronicleList) return;
   try {
     const entries = await actors.ignis.get_chronicle(BigInt(ignisChroniclePageNum));
     els.chroniclePage.textContent = `Page ${ignisChroniclePageNum + 1}`;
