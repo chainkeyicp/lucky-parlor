@@ -75,4 +75,5 @@ service : (principal) -> {
   set_minting_account : (principal) -> ();
   mint : (principal, nat) -> (variant { Ok; Err : text });
   burn : (nat) -> (variant { Ok : nat; Err : TransferError });
+  get_cycles_balance : () -> (nat) query;
 }

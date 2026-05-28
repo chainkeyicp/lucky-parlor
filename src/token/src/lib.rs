@@ -153,14 +153,13 @@ fn pre_upgrade() {
 fn post_upgrade() {
     let (state,): (State,) = ic_cdk::storage::stable_restore()
         .or_else(|_| {
-            ic_cdk::storage::stable_restore::<(OldState,)>()
-                .map(|(old,)| (migrate_old_state(old),))
+            ic_cdk::storage::stable_restore::<(OldState,)>().map(|(old,)| (migrate_old_state(old),))
         })
         .or_else(|_| {
             ic_cdk::storage::stable_restore::<(LegacyState,)>()
                 .map(|(old,)| (migrate_legacy_state(old),))
         })
-        .unwrap_or_else(|_| (State::default(),));
+        .unwrap_or_else(|e| ic_cdk::trap(&format!("CRITICAL: state restore failed: {}", e)));
     STATE.with(|s| *s.borrow_mut() = state);
 }
 
@@ -198,10 +197,22 @@ fn icrc1_fee() -> Nat {
 #[query]
 fn icrc1_metadata() -> Vec<(String, MetadataValue)> {
     vec![
-        ("icrc1:name".to_string(), MetadataValue::Text(TOKEN_NAME.to_string())),
-        ("icrc1:symbol".to_string(), MetadataValue::Text(TOKEN_SYMBOL.to_string())),
-        ("icrc1:decimals".to_string(), MetadataValue::Nat(Nat::from(DECIMALS))),
-        ("icrc1:fee".to_string(), MetadataValue::Nat(Nat::from(TRANSFER_FEE))),
+        (
+            "icrc1:name".to_string(),
+            MetadataValue::Text(TOKEN_NAME.to_string()),
+        ),
+        (
+            "icrc1:symbol".to_string(),
+            MetadataValue::Text(TOKEN_SYMBOL.to_string()),
+        ),
+        (
+            "icrc1:decimals".to_string(),
+            MetadataValue::Nat(Nat::from(DECIMALS)),
+        ),
+        (
+            "icrc1:fee".to_string(),
+            MetadataValue::Nat(Nat::from(TRANSFER_FEE)),
+        ),
     ]
 }
 
@@ -261,7 +272,11 @@ fn total_balance_of(account: Principal) -> Nat {
     STATE.with(|s| {
         let state = s.borrow();
         let liquid = *state.balances.get(&default_account(account)).unwrap_or(&0);
-        let staked = state.staked.get(&account).map(|b| total_staked(b)).unwrap_or(0);
+        let staked = state
+            .staked
+            .get(&account)
+            .map(|b| total_staked(b))
+            .unwrap_or(0);
         Nat::from(liquid + staked)
     })
 }
@@ -317,11 +332,20 @@ fn get_boost_bps_batch(accounts: Vec<Principal>) -> Vec<u64> {
         accounts
             .iter()
             .map(|account| {
-                let staked = state.staked.get(account).map(|b| total_staked(b)).unwrap_or(0);
+                let staked = state
+                    .staked
+                    .get(account)
+                    .map(|b| total_staked(b))
+                    .unwrap_or(0);
                 boost_bps(staked)
             })
             .collect()
     })
+}
+
+#[query]
+fn get_cycles_balance() -> u128 {
+    ic_cdk::api::canister_balance128()
 }
 
 // ── ICRC-1 transfer ──
@@ -386,14 +410,10 @@ fn stake(amount: Nat) -> Result<StakeInfo, String> {
         }
 
         *state.balances.entry(account).or_insert(0) -= amount;
-        state
-            .staked
-            .entry(user)
-            .or_default()
-            .push(StakeBatch {
-                amount,
-                staked_at: now,
-            });
+        state.staked.entry(user).or_default().push(StakeBatch {
+            amount,
+            staked_at: now,
+        });
         Ok(stake_info(&state, user, now))
     })
 }
@@ -441,7 +461,7 @@ fn unstake(amount: Nat) -> Result<StakeInfo, String> {
             }
         }
 
-        let unstaked = nat_to_u128(&amount).unwrap();
+        let unstaked = nat_to_u128(&amount).ok_or("Amount overflow".to_string())?;
         *state.balances.entry(default_account(user)).or_insert(0) += unstaked;
         Ok(stake_info(&state, user, now))
     })
@@ -556,7 +576,13 @@ fn migrate_old_state(old: OldState) -> State {
             .into_iter()
             .filter(|(_, amount)| *amount > 0)
             .map(|(principal, amount)| {
-                (principal, vec![StakeBatch { amount, staked_at: 0 }])
+                (
+                    principal,
+                    vec![StakeBatch {
+                        amount,
+                        staked_at: 0,
+                    }],
+                )
             })
             .collect(),
         total_minted: old.total_minted,
@@ -579,7 +605,13 @@ fn migrate_legacy_state(old: LegacyState) -> State {
             .into_iter()
             .filter(|(_, amount)| *amount > 0)
             .map(|(principal, amount)| {
-                (principal, vec![StakeBatch { amount, staked_at: 0 }])
+                (
+                    principal,
+                    vec![StakeBatch {
+                        amount,
+                        staked_at: 0,
+                    }],
+                )
             })
             .collect(),
         total_minted: old.total_minted,

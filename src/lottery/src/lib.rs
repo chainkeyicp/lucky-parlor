@@ -1,6 +1,6 @@
 use candid::{CandidType, Nat, Principal};
 use ic_cdk::{caller, query, update};
-use ic_cdk_timers::set_timer_interval;
+use ic_cdk_timers::{set_timer_interval, TimerId};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -9,10 +9,10 @@ use std::time::Duration;
 
 const ONE_LUCKY: u128 = 100_000_000;
 const DRAWS_PER_STEP: u64 = 14;
-const STEP_E8S: u64 = 10_000_000;         // 0.1 ICP per step
-const MIN_TICKET_E8S: u64 = 10_000_000;   // 0.1 ICP
-const MAX_TICKET_E8S: u64 = 100_000_000;  // 1.0 ICP
-const DRAW_INTERVAL_SECS: u64 = 60;
+const STEP_E8S: u64 = 10_000_000; // 0.1 ICP per step
+const MIN_TICKET_E8S: u64 = 10_000_000; // 0.1 ICP
+const MAX_TICKET_E8S: u64 = 100_000_000; // 1.0 ICP
+const DEFAULT_DRAW_INTERVAL_SECS: u64 = 600;
 const DAY_NANOS: u64 = 86_400 * 1_000_000_000;
 
 const BASE_REWARD_LUCKY: u128 = 50 * ONE_LUCKY;
@@ -21,11 +21,11 @@ const MAX_REWARD_LUCKY: u128 = 500 * ONE_LUCKY;
 const DAILY_EMISSION_CAP_LUCKY: u128 = 500_000 * ONE_LUCKY;
 const REWARD_POOL_LUCKY: u128 = 70_000_000 * ONE_LUCKY;
 
-const BURN_TAX_BPS: u128 = 2_000;             // 20% of reward → burn pool
-const BURN_EPOCH_NANOS: u64 = 7 * DAY_NANOS;  // weekly burn
+const BURN_TAX_BPS: u128 = 2_000; // 20% of reward → burn pool
+const BURN_EPOCH_NANOS: u64 = 7 * DAY_NANOS; // weekly burn
 
-const STREAK_BOOST_3: u64 = 500;    // +5% at 3+ consecutive days
-const STREAK_BOOST_7: u64 = 1_500;  // +15% at 7+ consecutive days
+const STREAK_BOOST_3: u64 = 500; // +5% at 3+ consecutive days
+const STREAK_BOOST_7: u64 = 1_500; // +15% at 7+ consecutive days
 const STREAK_BOOST_14: u64 = 2_500; // +25% at 14+ consecutive days
 const STREAK_BOOST_30: u64 = 3_000; // +30% at 30+ consecutive days
 
@@ -40,6 +40,7 @@ pub struct ConfigureArgs {
     pub token_canister: Option<Principal>,
     pub treasury_canister: Option<Principal>,
     pub ignis_canister: Option<Principal>,
+    pub draw_interval_secs: Option<u64>,
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -169,6 +170,12 @@ struct State {
     burn_pool_lucky_e8s: u128,
     last_burn_epoch: u64,
     total_burned_lucky_e8s: u128,
+    #[serde(default = "default_draw_interval")]
+    draw_interval_secs: u64,
+}
+
+fn default_draw_interval() -> u64 {
+    DEFAULT_DRAW_INTERVAL_SECS
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
@@ -278,12 +285,15 @@ impl Default for State {
             burn_pool_lucky_e8s: 0,
             last_burn_epoch: 0,
             total_burned_lucky_e8s: 0,
+            draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
         }
     }
 }
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    static DRAW_TIMER_ID: RefCell<Option<TimerId>> = const { RefCell::new(None) };
+    static DRAW_IN_PROGRESS: RefCell<bool> = const { RefCell::new(false) };
 }
 
 #[ic_cdk::init]
@@ -324,7 +334,12 @@ fn post_upgrade() {
         .or_else(|_| {
             ic_cdk::storage::stable_restore::<(OldState,)>().map(|(old,)| (migrate_old_state(old),))
         })
-        .unwrap_or_else(|_| (State::default(),));
+        .unwrap_or_else(|e| {
+            ic_cdk::trap(&format!(
+                "CRITICAL: state restore failed, all formats exhausted: {}",
+                e
+            ))
+        });
     STATE.with(|s| *s.borrow_mut() = state);
     schedule_draw_timer();
 }
@@ -332,6 +347,7 @@ fn post_upgrade() {
 #[update]
 fn configure(args: ConfigureArgs) {
     with_owner(|| {
+        let mut reschedule = false;
         STATE.with(|s| {
             let mut state = s.borrow_mut();
             if let Some(id) = args.token_canister {
@@ -343,7 +359,16 @@ fn configure(args: ConfigureArgs) {
             if let Some(id) = args.ignis_canister {
                 state.ignis_canister = Some(id);
             }
+            if let Some(interval) = args.draw_interval_secs {
+                if interval > 0 && interval != state.draw_interval_secs {
+                    state.draw_interval_secs = interval;
+                    reschedule = true;
+                }
+            }
         });
+        if reschedule {
+            schedule_draw_timer();
+        }
     });
 }
 
@@ -365,7 +390,7 @@ fn get_deposit_account(user: Principal) -> Result<Account, String> {
 
 #[update]
 async fn buy_ticket(amount_e8s: u64) -> Result<ClaimResult, String> {
-    if amount_e8s < MIN_TICKET_E8S || amount_e8s > MAX_TICKET_E8S {
+    if !(MIN_TICKET_E8S..=MAX_TICKET_E8S).contains(&amount_e8s) {
         return Err("Amount must be between 0.1 and 1.0 ICP".to_string());
     }
     let draws = (amount_e8s / STEP_E8S) * DRAWS_PER_STEP;
@@ -424,12 +449,8 @@ async fn buy_ticket(amount_e8s: u64) -> Result<ClaimResult, String> {
     if burn_e8s > 0 && claim_result.distribution_complete {
         if let Some(ignis) = STATE.with(|s| s.borrow().ignis_canister) {
             ic_cdk::spawn(async move {
-                let _ = ic_cdk::call::<_, (Result<(), String>,)>(
-                    ignis,
-                    "on_burn",
-                    (burn_e8s,),
-                )
-                .await;
+                let _ =
+                    ic_cdk::call::<_, (Result<(), String>,)>(ignis, "on_burn", (burn_e8s,)).await;
             });
         }
     }
@@ -451,11 +472,6 @@ fn admin_reset_daily_emission() {
         state.emitted_today_lucky_e8s = 0;
         state.emitted_day = 0;
     });
-}
-
-#[update]
-async fn sample_random_blob() -> Result<Vec<u8>, String> {
-    raw_rand_bytes().await
 }
 
 #[query]
@@ -544,9 +560,7 @@ fn get_stats() -> LotteryStats {
             active_tickets: active_tickets(&state).len() as u64,
             active_players: active_player_count(&state),
             emitted_today_lucky_e8s: Nat::from(state.emitted_today_lucky_e8s),
-            daily_cap_lucky_e8s: Nat::from(current_daily_cap(
-                state.total_rewards_minted_lucky_e8s,
-            )),
+            daily_cap_lucky_e8s: Nat::from(current_daily_cap(state.total_rewards_minted_lucky_e8s)),
             total_rewards_minted_lucky_e8s: Nat::from(state.total_rewards_minted_lucky_e8s),
             halving_level: halving_level(state.total_rewards_minted_lucky_e8s) as u64,
             burn_pool_lucky_e8s: Nat::from(state.burn_pool_lucky_e8s),
@@ -557,11 +571,32 @@ fn get_stats() -> LotteryStats {
 }
 
 async fn do_draw() -> Result<Option<DrawResult>, String> {
+    // Prevent concurrent draws (timer vs admin_run_draw overlap)
+    let was_in_progress = DRAW_IN_PROGRESS.with(|d| {
+        let prev = *d.borrow();
+        *d.borrow_mut() = true;
+        prev
+    });
+    if was_in_progress {
+        return Err("Draw already in progress".to_string());
+    }
+
+    let result = do_draw_inner().await;
+
+    DRAW_IN_PROGRESS.with(|d| *d.borrow_mut() = false);
+    result
+}
+
+async fn do_draw_inner() -> Result<Option<DrawResult>, String> {
     let now = ic_cdk::api::time();
     let (token_canister, ignis_canister, active) = STATE.with(|s| {
         let mut state = s.borrow_mut();
         prune_exhausted(&mut state);
-        (state.token_canister, state.ignis_canister, active_tickets(&state))
+        (
+            state.token_canister,
+            state.ignis_canister,
+            active_tickets(&state),
+        )
     });
 
     if active.is_empty() {
@@ -605,25 +640,32 @@ async fn do_draw() -> Result<Option<DrawResult>, String> {
     let burn_tax = reward * BURN_TAX_BPS / 10_000;
     let winner_reward = reward - burn_tax;
 
-    // Mint winner's portion
-    let (mint_result,): (Result<(), String>,) =
-        ic_cdk::call(token, "mint", (winner, Nat::from(winner_reward)))
-            .await
-            .map_err(|e| format!("Reward mint failed: {:?}", e))?;
-    if let Err(err) = mint_result {
-        rollback_reward(now, reward);
-        return Err(err);
+    // Mint winner's portion — rollback reserved reward on ANY failure
+    let mint_outcome =
+        ic_cdk::call::<_, (Result<(), String>,)>(token, "mint", (winner, Nat::from(winner_reward)))
+            .await;
+    match mint_outcome {
+        Err(reject) => {
+            rollback_reward(now, reward);
+            return Err(format!("Reward mint rejected: {:?}", reject));
+        }
+        Ok((Err(err),)) => {
+            rollback_reward(now, reward);
+            return Err(err);
+        }
+        Ok((Ok(()),)) => {}
     }
 
-    // Mint burn tax to lottery canister's own balance (burn pool)
+    // Mint burn tax to lottery canister's own balance (burn pool) — best effort
     if burn_tax > 0 {
         let self_id = ic_cdk::id();
-        let (pool_result,): (Result<(), String>,) =
-            ic_cdk::call(token, "mint", (self_id, Nat::from(burn_tax)))
-                .await
-                .map_err(|e| format!("Burn pool mint failed: {:?}", e))?;
-        if pool_result.is_ok() {
+        let pool_outcome =
+            ic_cdk::call::<_, (Result<(), String>,)>(token, "mint", (self_id, Nat::from(burn_tax)))
+                .await;
+        if matches!(pool_outcome, Ok((Ok(()),))) {
             STATE.with(|s| s.borrow_mut().burn_pool_lucky_e8s += burn_tax);
+        } else {
+            ic_cdk::println!("burn pool mint failed (best-effort): {:?}", pool_outcome);
         }
     }
 
@@ -669,12 +711,8 @@ async fn do_draw() -> Result<Option<DrawResult>, String> {
             ignis_won: false,
         };
         ic_cdk::spawn(async move {
-            let _ = ic_cdk::call::<_, (Result<(), String>,)>(
-                ignis,
-                "on_draw",
-                (ignis_event,),
-            )
-            .await;
+            let _ =
+                ic_cdk::call::<_, (Result<(), String>,)>(ignis, "on_draw", (ignis_event,)).await;
         });
     }
 
@@ -688,7 +726,11 @@ async fn maybe_execute_burn() {
     let now = ic_cdk::api::time();
     let (pool, last_epoch, token) = STATE.with(|s| {
         let st = s.borrow();
-        (st.burn_pool_lucky_e8s, st.last_burn_epoch, st.token_canister)
+        (
+            st.burn_pool_lucky_e8s,
+            st.last_burn_epoch,
+            st.token_canister,
+        )
     });
 
     if pool == 0 || now.saturating_sub(last_epoch) < BURN_EPOCH_NANOS {
@@ -699,7 +741,7 @@ async fn maybe_execute_burn() {
     let result: Result<(Result<Nat, String>,), _> =
         ic_cdk::call(token, "burn", (Nat::from(pool),)).await;
 
-    if result.is_ok() {
+    if matches!(result, Ok((Ok(_),))) {
         STATE.with(|s| {
             let mut st = s.borrow_mut();
             st.total_burned_lucky_e8s += pool;
@@ -747,11 +789,9 @@ fn reserve_reward(now: u64, active_players: u64, boost_bps: u64) -> Result<u128,
 
         let base = current_reward_target(state.total_rewards_minted_lucky_e8s, active_players);
         let boosted = base * boost_bps as u128 / 10_000;
-        let remaining_daily =
-            current_daily_cap(state.total_rewards_minted_lucky_e8s)
-                .saturating_sub(state.emitted_today_lucky_e8s);
-        let remaining_pool =
-            REWARD_POOL_LUCKY.saturating_sub(state.total_rewards_minted_lucky_e8s);
+        let remaining_daily = current_daily_cap(state.total_rewards_minted_lucky_e8s)
+            .saturating_sub(state.emitted_today_lucky_e8s);
+        let remaining_pool = REWARD_POOL_LUCKY.saturating_sub(state.total_rewards_minted_lucky_e8s);
         let reward = boosted.min(remaining_daily).min(remaining_pool);
         state.emitted_today_lucky_e8s += reward;
         state.total_rewards_minted_lucky_e8s += reward;
@@ -786,8 +826,8 @@ fn rollback_reward(now: u64, reward: u128) {
 
 fn current_reward_target(total_rewards_minted: u128, active_players: u64) -> u128 {
     let divisor = halving_divisor(total_rewards_minted);
-    let target =
-        (BASE_REWARD_LUCKY + active_players as u128 * PER_PLAYER_REWARD_LUCKY).min(MAX_REWARD_LUCKY);
+    let target = (BASE_REWARD_LUCKY + active_players as u128 * PER_PLAYER_REWARD_LUCKY)
+        .min(MAX_REWARD_LUCKY);
     (target / divisor).max(ONE_LUCKY)
 }
 
@@ -852,7 +892,11 @@ fn get_streak_info(user: Principal) -> StreakInfo {
     STATE.with(|s| {
         let state = s.borrow();
         let consecutive = effective_streak(&state.streaks, &user, today);
-        let last_day = state.streaks.get(&user).map(|d| d.last_purchase_day).unwrap_or(0);
+        let last_day = state
+            .streaks
+            .get(&user)
+            .map(|d| d.last_purchase_day)
+            .unwrap_or(0);
         let alive = last_day == today || last_day + 1 == today;
         StreakInfo {
             consecutive_days: consecutive,
@@ -874,27 +918,52 @@ fn streak_boost_bps(consecutive_days: u64) -> u64 {
     }
 }
 
-fn effective_streak(streaks: &HashMap<Principal, StreakData>, user: &Principal, current_day: u64) -> u64 {
+fn effective_streak(
+    streaks: &HashMap<Principal, StreakData>,
+    user: &Principal,
+    current_day: u64,
+) -> u64 {
     match streaks.get(user) {
-        Some(data) => {
-            if data.last_purchase_day == current_day || data.last_purchase_day + 1 == current_day {
-                data.consecutive_days
-            } else {
-                0
-            }
+        Some(data)
+            if data.last_purchase_day == current_day
+                || data.last_purchase_day + 1 == current_day =>
+        {
+            data.consecutive_days
         }
+        Some(_) => 0,
         None => 0,
     }
 }
 
 fn schedule_draw_timer() {
-    set_timer_interval(Duration::from_secs(DRAW_INTERVAL_SECS), || {
+    DRAW_TIMER_ID.with(|t| {
+        if let Some(old_id) = t.borrow_mut().take() {
+            ic_cdk_timers::clear_timer(old_id);
+        }
+    });
+    let interval = STATE.with(|s| s.borrow().draw_interval_secs);
+    let id = set_timer_interval(Duration::from_secs(interval), || {
         ic_cdk::spawn(async {
+            let balance = ic_cdk::api::canister_balance128();
+            if balance < 1_000_000_000_000 {
+                ic_cdk::println!("WARNING: cycles balance low: {}", balance);
+            }
             if let Err(err) = do_draw().await {
                 ic_cdk::println!("draw skipped: {}", err);
             }
         });
     });
+    DRAW_TIMER_ID.with(|t| *t.borrow_mut() = Some(id));
+}
+
+#[query]
+fn get_draw_interval() -> u64 {
+    STATE.with(|s| s.borrow().draw_interval_secs)
+}
+
+#[query]
+fn get_cycles_balance() -> u128 {
+    ic_cdk::api::canister_balance128()
 }
 
 fn with_owner<F: FnOnce()>(f: F) {
@@ -929,7 +998,7 @@ fn migrate_legacy_tickets(tickets: Vec<LegacyTicket>) -> Vec<Ticket> {
         .filter(|t| t.expires_at > now)
         .map(|t| {
             let remaining_nanos = t.expires_at.saturating_sub(now);
-            let remaining_draws = (remaining_nanos / (60 * 1_000_000_000)).min(144).max(1);
+            let remaining_draws = (remaining_nanos / (60 * 1_000_000_000)).clamp(1, 144);
             Ticket {
                 id: t.id,
                 owner: t.owner,
@@ -958,6 +1027,7 @@ fn migrate_pre_burn_state(old: PreBurnState) -> State {
         burn_pool_lucky_e8s: 0,
         last_burn_epoch: 0,
         total_burned_lucky_e8s: 0,
+        draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
     }
 }
 
@@ -978,6 +1048,7 @@ fn migrate_pre_draws_state(old: PreDrawsState) -> State {
         burn_pool_lucky_e8s: 0,
         last_burn_epoch: 0,
         total_burned_lucky_e8s: 0,
+        draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
     }
 }
 
@@ -998,6 +1069,7 @@ fn migrate_pre_streak_state(old: PreStreakState) -> State {
         burn_pool_lucky_e8s: 0,
         last_burn_epoch: 0,
         total_burned_lucky_e8s: 0,
+        draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
     }
 }
 
@@ -1022,6 +1094,7 @@ fn migrate_pre_reveal_state(old: PreRevealState) -> State {
         burn_pool_lucky_e8s: 0,
         last_burn_epoch: 0,
         total_burned_lucky_e8s: 0,
+        draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
     }
 }
 
@@ -1046,6 +1119,7 @@ fn migrate_pre_ignis_state(old: PreIgnisState) -> State {
         burn_pool_lucky_e8s: 0,
         last_burn_epoch: 0,
         total_burned_lucky_e8s: 0,
+        draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
     }
 }
 
@@ -1070,5 +1144,6 @@ fn migrate_old_state(old: OldState) -> State {
         burn_pool_lucky_e8s: 0,
         last_burn_epoch: 0,
         total_burned_lucky_e8s: 0,
+        draw_interval_secs: DEFAULT_DRAW_INTERVAL_SECS,
     }
 }

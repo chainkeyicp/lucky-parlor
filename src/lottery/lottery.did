@@ -7,6 +7,7 @@ type ConfigureArgs = record {
   token_canister : opt principal;
   treasury_canister : opt principal;
   ignis_canister : opt principal;
+  draw_interval_secs : opt nat64;
 };
 
 type ClaimResult = record {
@@ -74,7 +75,6 @@ service : {
   buy_ticket : (nat64) -> (variant { Ok : ClaimResult; Err : text });
   admin_run_draw : () -> (variant { Ok : opt DrawResult; Err : text });
   admin_reset_daily_emission : () -> ();
-  sample_random_blob : () -> (variant { Ok : vec nat8; Err : text });
   get_active_ticket_count : () -> (nat64) query;
   get_active_player_count : () -> (nat64) query;
   get_draw_history : () -> (vec DrawResult) query;
@@ -83,4 +83,6 @@ service : {
   get_my_tickets : (principal) -> (vec TicketInfo) query;
   get_stats : () -> (LotteryStats) query;
   get_streak_info : (principal) -> (StreakInfo) query;
+  get_draw_interval : () -> (nat64) query;
+  get_cycles_balance : () -> (nat) query;
 }

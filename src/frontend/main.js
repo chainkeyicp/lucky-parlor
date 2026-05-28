@@ -4,6 +4,7 @@ import { CANISTER_IDS } from "./canister-ids.js";
 
 const E8S = 100_000_000n;
 const ICP_LEDGER_FEE = 10_000n;
+const TICKET_SPLIT_FEE_COUNT = isLocal ? 3n : 2n;
 const DRAWS_PER_ICP = 144;
 const BASE_REWARD_LUCKY = 50;
 const PER_PLAYER_REWARD_LUCKY = 10;
@@ -132,37 +133,53 @@ const accountType = (IDL) => IDL.Record({
   subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
 });
 
-const ledgerIDL = ({ IDL }) => {
+const ledgerTransferError = (IDL) => IDL.Variant({
+  BadFee: IDL.Record({ expected_fee: IDL.Nat }),
+  BadBurn: IDL.Record({ min_burn_amount: IDL.Nat }),
+  InsufficientFunds: IDL.Record({ balance: IDL.Nat }),
+  TooOld: IDL.Null,
+  CreatedInFuture: IDL.Record({ ledger_time: IDL.Nat64 }),
+  Duplicate: IDL.Record({ duplicate_of: IDL.Nat }),
+  TemporarilyUnavailable: IDL.Null,
+  GenericError: IDL.Record({ error_code: IDL.Nat, message: IDL.Text }),
+});
+
+const ledgerTransferArgs = (IDL, Account) => IDL.Record({
+  from_subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
+  to: Account,
+  amount: IDL.Nat,
+  fee: IDL.Opt(IDL.Nat),
+  memo: IDL.Opt(IDL.Vec(IDL.Nat8)),
+  created_at_time: IDL.Opt(IDL.Nat64),
+});
+
+// Real ICP ledger IDL (ICRC-1 standard — mainnet compatible)
+const realLedgerIDL = ({ IDL }) => {
   const Account = accountType(IDL);
-  const TransferError = IDL.Variant({
-    BadFee: IDL.Record({ expected_fee: IDL.Nat }),
-    BadBurn: IDL.Record({ min_burn_amount: IDL.Nat }),
-    InsufficientFunds: IDL.Record({ balance: IDL.Nat }),
-    TooOld: IDL.Null,
-    CreatedInFuture: IDL.Record({ ledger_time: IDL.Nat64 }),
-    Duplicate: IDL.Record({ duplicate_of: IDL.Nat }),
-    TemporarilyUnavailable: IDL.Null,
-    GenericError: IDL.Record({ error_code: IDL.Nat, message: IDL.Text }),
+  const TransferError = ledgerTransferError(IDL);
+  return IDL.Service({
+    icrc1_balance_of: IDL.Func([Account], [IDL.Nat], ["query"]),
+    icrc1_fee: IDL.Func([], [IDL.Nat], ["query"]),
+    icrc1_transfer: IDL.Func([ledgerTransferArgs(IDL, Account)], [IDL.Variant({ Ok: IDL.Nat, Err: TransferError })], []),
   });
+};
+
+// Mock ledger IDL (local dev — includes faucet and get_transactions)
+const mockLedgerIDL = ({ IDL }) => {
+  const Account = accountType(IDL);
+  const TransferError = ledgerTransferError(IDL);
   return IDL.Service({
     faucet: IDL.Func([Account, IDL.Nat], [IDL.Variant({ Ok: IDL.Nat, Err: IDL.Text })], []),
     icrc1_balance_of: IDL.Func([Account], [IDL.Nat], ["query"]),
     icrc1_fee: IDL.Func([], [IDL.Nat], ["query"]),
-    icrc1_transfer: IDL.Func([
-      IDL.Record({
-        from_subaccount: IDL.Opt(IDL.Vec(IDL.Nat8)),
-        to: Account,
-        amount: IDL.Nat,
-        fee: IDL.Opt(IDL.Nat),
-        memo: IDL.Opt(IDL.Vec(IDL.Nat8)),
-        created_at_time: IDL.Opt(IDL.Nat64),
-      })
-    ], [IDL.Variant({ Ok: IDL.Nat, Err: TransferError })], []),
+    icrc1_transfer: IDL.Func([ledgerTransferArgs(IDL, Account)], [IDL.Variant({ Ok: IDL.Nat, Err: TransferError })], []),
     get_transactions: IDL.Func([], [IDL.Vec(IDL.Record({
       index: IDL.Nat, from: Account, to: Account, amount: IDL.Nat, fee: IDL.Nat, timestamp: IDL.Nat64,
     }))], ["query"]),
   });
 };
+
+const ledgerIDL = isLocal ? mockLedgerIDL : realLedgerIDL;
 
 const tokenIDL = ({ IDL }) => {
   const Account = accountType(IDL);
@@ -249,6 +266,7 @@ const lotteryIDL = ({ IDL }) => {
     get_ticket_status: IDL.Func([IDL.Principal], [TicketStatus], []),
     get_my_tickets: IDL.Func([IDL.Principal], [IDL.Vec(TicketInfo)], ["query"]),
     get_streak_info: IDL.Func([IDL.Principal], [StreakInfo], ["query"]),
+    get_draw_interval: IDL.Func([], [IDL.Nat64], ["query"]),
   });
 };
 
@@ -279,7 +297,7 @@ const ignisIDL = ({ IDL }) => {
 
 // ── State ──
 
-const DRAW_INTERVAL = 60;
+let DRAW_INTERVAL = isLocal ? 60 : 600;
 const TIMER_CIRCUMFERENCE = 2 * Math.PI * 32; // r=32
 
 let principal;
@@ -315,6 +333,21 @@ async function makeActors(currentIdentity) {
 async function boot() {
   actors = await makeActors(null);
   bindEvents();
+  if (!isLocal) {
+    els.faucetBtn.style.display = "none";
+    els.newIdentityBtn.style.display = "none";
+    // Restore previous Internet Identity session
+    try {
+      const client = await getAuthClient();
+      if (await client.isAuthenticated()) {
+        await activateIdentity(client.getIdentity(), "Session restored.");
+      }
+    } catch (_) {}
+  }
+  try {
+    const interval = await actors.lottery.get_draw_interval();
+    if (interval && Number(interval) > 0) DRAW_INTERVAL = Number(interval);
+  } catch (_) {}
   await refreshAll();
   startDrawTimer();
   setInterval(refreshAll, 20_000);
@@ -335,6 +368,7 @@ function showTimer() {
 }
 
 let drawPollActive = false;
+let pollStartTime = 0;
 const TIMER_LAG_SECS = 7;
 
 function tickTimer() {
@@ -366,8 +400,15 @@ function tickTimer() {
     els.buyStatus.textContent = urgent ? "drawing soon" : "open";
   }
 
+  // Safety: force-reset stuck poll after 25s
+  if (drawPollActive && pollStartTime && (nowMs - pollStartTime > 25000)) {
+    drawPollActive = false;
+    pollStartTime = 0;
+  }
+
   if (displayed <= TIMER_LAG_SECS && !drawPollActive && !pendingDraw) {
     drawPollActive = true;
+    pollStartTime = nowMs;
     pollForNewDraw();
   }
 
@@ -389,12 +430,14 @@ function tickTimer() {
 async function pollForNewDraw() {
   const prevRound = lastKnownRound;
   for (let i = 0; i < 10; i++) {
-    await refreshAll();
-    if (lastKnownRound > prevRound) { drawPollActive = false; return; }
+    try {
+      await refreshAll();
+    } catch (e) { console.warn("poll refresh failed", e); }
+    if (lastKnownRound > prevRound) { drawPollActive = false; pollStartTime = 0; return; }
     await new Promise(r => setTimeout(r, 2000));
   }
   drawPollActive = false;
-  if (!lastDrawTimestamp) bootTimestamp = Date.now();
+  pollStartTime = 0;
 }
 
 // ── Events ──
@@ -447,8 +490,31 @@ function bindEvents() {
 
 // ── Identity ──
 
+let authClient = null;
+
+async function getAuthClient() {
+  if (authClient) return authClient;
+  const deps = "@dfinity/agent@2.1.3,@dfinity/identity@2.1.3,@dfinity/candid@2.1.3,@dfinity/principal@2.1.3";
+  const { AuthClient: AC } = await import(`https://esm.sh/@dfinity/auth-client@2.1.3?deps=${deps}`);
+  authClient = await AC.create();
+  return authClient;
+}
+
 async function login() {
-  await activateIdentity(loadOrCreateIdentity(), "Local identity active.");
+  if (isLocal) {
+    await activateIdentity(loadOrCreateIdentity(), "Local identity active.");
+  } else {
+    const client = await getAuthClient();
+    await new Promise((resolve, reject) => {
+      client.login({
+        identityProvider: "https://id.ai",
+        maxTimeToLive: BigInt(7 * 24 * 60 * 60 * 1_000_000_000),
+        onSuccess: resolve,
+        onError: reject,
+      });
+    });
+    await activateIdentity(client.getIdentity(), "Internet Identity active.");
+  }
 }
 
 async function createNewIdentity() {
@@ -500,6 +566,7 @@ async function activateIdentity(nextIdentity, message) {
 // ── Actions ──
 
 async function faucet() {
+  if (!isLocal) return;
   const p = ensurePrincipal();
   if (!p) return;
   setNotice("Minting local test ICP...", "");
@@ -537,7 +604,7 @@ async function buyTicket() {
   try {
     const deposit = await actors.lottery.get_deposit_account(p);
     if ("Err" in deposit) throw new Error(deposit.Err);
-    const depositAmount = amountE8s + 3n * ICP_LEDGER_FEE;
+    const depositAmount = amountE8s + TICKET_SPLIT_FEE_COUNT * ICP_LEDGER_FEE;
     const transfer = await actors.ledger.icrc1_transfer({
       from_subaccount: [], to: deposit.Ok, amount: depositAmount,
       fee: [], memo: [], created_at_time: [],
@@ -982,7 +1049,7 @@ async function refreshActivity() {
   try {
     const myText = principal.toText();
     const [txs, history, batches] = await Promise.all([
-      actors.ledger.get_transactions(),
+      actors.ledger.get_transactions ? actors.ledger.get_transactions() : Promise.resolve([]),
       actors.lottery.get_draw_history(),
       actors.token.get_stake_batches(principal),
     ]);

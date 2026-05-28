@@ -48,6 +48,7 @@ dfx canister call lottery configure "(record {
   token_canister = opt principal \"$TOKEN_ID\";
   treasury_canister = opt principal \"$TREASURY_ID\";
   ignis_canister = opt principal \"$IGNIS_ID\";
+  draw_interval_secs = opt (60 : nat64);
 })"
 dfx canister call treasury configure "(record {
   lottery_canister = opt principal \"$LOTTERY_ID\";
@@ -55,6 +56,7 @@ dfx canister call treasury configure "(record {
   dev_account = opt record { owner = principal \"$DEV_PRINCIPAL\"; subaccount = null };
   liquidity_account = opt record { owner = principal \"$TREASURY_ID\"; subaccount = null };
   burn_account = opt record { owner = principal \"aaaaa-aa\"; subaccount = null };
+  topup_canisters = null;
 })"
 dfx canister call ignis configure "(record {
   lottery_canister = opt principal \"$LOTTERY_ID\";

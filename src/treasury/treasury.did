@@ -3,12 +3,29 @@ type Account = record {
   subaccount : opt vec nat8;
 };
 
+type TopUpTarget = record {
+  canister_id : principal;
+  name : text;
+  share_bps : nat16;
+};
+
+type TopUpStatus = record {
+  canister_id : principal;
+  name : text;
+  amount_e8s : nat64;
+  block_index : opt nat64;
+  cycles_minted : opt nat;
+  done : bool;
+  last_error : opt text;
+};
+
 type ConfigureArgs = record {
   lottery_canister : opt principal;
   icp_ledger : opt principal;
   dev_account : opt Account;
   liquidity_account : opt Account;
   burn_account : opt Account;
+  topup_canisters : opt vec TopUpTarget;
 };
 
 type ClaimResult = record {
@@ -35,5 +52,8 @@ service : {
   retry_pending_distribution : (vec nat8) -> (variant { Ok : bool; Err : text });
   get_deposit_account : (vec nat8) -> (Account) query;
   get_stats : () -> (Stats) query;
+  get_topup_targets : () -> (vec TopUpTarget) query;
+  get_pending_topups : (vec nat8) -> (vec TopUpStatus) query;
   get_split : () -> (nat64, nat64, nat64) query;
+  get_cycles_balance : () -> (nat) query;
 }

@@ -3,7 +3,7 @@
     "frontend": {
       "type": "assets",
       "source": ["src/frontend"],
-      "dependencies": ["ignis", "lottery", "token", "treasury", "icp_ledger_mock"]
+      "dependencies": ["ignis", "lottery", "token", "treasury"]
     },
     "ignis": {
       "candid": "src/ignis/ignis.did",

@@ -62,6 +62,7 @@ type RitualResult = record {
 type ConfigureArgs = record {
   lottery_canister : opt principal;
   treasury_canister : opt principal;
+  llm_canister : opt principal;
 };
 
 service : {
@@ -82,4 +83,5 @@ service : {
   get_remembered_players : () -> (vec RememberedPlayer) query;
   get_arena_stats : () -> (nat64, nat) query;
   is_arena_enabled : () -> (bool) query;
+  get_cycles_balance : () -> (nat) query;
 }

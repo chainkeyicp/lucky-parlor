@@ -149,7 +149,10 @@ pub struct DrawEvent {
 pub struct ConfigureArgs {
     pub lottery_canister: Option<Principal>,
     pub treasury_canister: Option<Principal>,
+    pub llm_canister: Option<Principal>,
 }
+
+const DEFAULT_LLM_CANISTER: &str = "w36hm-eqaaa-aaaal-qr76a-cai";
 
 // ── State ──
 
@@ -158,6 +161,8 @@ struct State {
     owner: Principal,
     lottery_canister: Option<Principal>,
     treasury_canister: Option<Principal>,
+    #[serde(default)]
+    llm_canister: Option<Principal>,
     // Evolution
     stage: Stage,
     total_burn_e8s: u64,
@@ -192,6 +197,7 @@ impl Default for State {
             owner: Principal::anonymous(),
             lottery_canister: None,
             treasury_canister: None,
+            llm_canister: None,
             stage: Stage::Spark,
             total_burn_e8s: 0,
             mood: Mood::Curious,
@@ -233,8 +239,8 @@ fn pre_upgrade() {
 
 #[ic_cdk::post_upgrade]
 fn post_upgrade() {
-    let (state,): (State,) =
-        ic_cdk::storage::stable_restore().unwrap_or_else(|_| (State::default(),));
+    let (state,): (State,) = ic_cdk::storage::stable_restore()
+        .unwrap_or_else(|e| ic_cdk::trap(&format!("CRITICAL: state restore failed: {}", e)));
     STATE.with(|s| *s.borrow_mut() = state);
     schedule_mood_timer();
 }
@@ -252,7 +258,15 @@ fn configure(args: ConfigureArgs) {
         if let Some(id) = args.treasury_canister {
             state.treasury_canister = Some(id);
         }
+        if let Some(id) = args.llm_canister {
+            state.llm_canister = Some(id);
+        }
     });
+}
+
+#[query]
+fn get_cycles_balance() -> u128 {
+    ic_cdk::api::canister_balance128()
 }
 
 #[update]
@@ -334,8 +348,7 @@ async fn on_burn(amount_e8s: u64) -> Result<(), String> {
     });
 
     if old_stage != new_stage {
-        let icp_total =
-            STATE.with(|s| s.borrow().total_burn_e8s / ONE_ICP_E8S);
+        let icp_total = STATE.with(|s| s.borrow().total_burn_e8s / ONE_ICP_E8S);
         STATE.with(|s| {
             add_notable_event(
                 &mut s.borrow_mut(),
@@ -378,11 +391,16 @@ async fn chat(message: String) -> Result<String, String> {
     Ok(fallback_chat_response(&stage, &mood, hunger, &message))
 }
 
+fn resolve_llm_canister() -> Option<Principal> {
+    STATE
+        .with(|s| s.borrow().llm_canister)
+        .or_else(|| Principal::from_text(DEFAULT_LLM_CANISTER).ok())
+}
+
 async fn try_llm_chat(message: &str) -> Option<String> {
     let system_prompt = STATE.with(|s| build_system_prompt(&s.borrow()));
 
-    // Use raw ic_cdk::call to avoid the unwrap() trap in ic_llm::ChatBuilder::send()
-    let llm_canister = Principal::from_text("w36hm-eqaaa-aaaal-qr76a-cai").ok()?;
+    let llm_canister = resolve_llm_canister()?;
 
     let result: Result<(ic_llm::Response,), _> = ic_cdk::call(
         llm_canister,
@@ -390,12 +408,17 @@ async fn try_llm_chat(message: &str) -> Option<String> {
         (LlmRequest {
             model: "Qwen3_32B".to_string(),
             messages: vec![
-                ChatMessage::System { content: system_prompt },
-                ChatMessage::User { content: message.to_string() },
+                ChatMessage::System {
+                    content: system_prompt,
+                },
+                ChatMessage::User {
+                    content: message.to_string(),
+                },
             ],
             tools: None::<Vec<()>>,
         },),
-    ).await;
+    )
+    .await;
 
     match result {
         Ok((response,)) => response.message.content,
@@ -412,17 +435,20 @@ struct LlmRequest {
 
 /// Safe LLM prompt — returns None instead of trapping when LLM canister is unavailable.
 async fn safe_llm_prompt(model: &str, prompt: &str) -> Option<String> {
-    let llm_canister = Principal::from_text("w36hm-eqaaa-aaaal-qr76a-cai").ok()?;
+    let llm_canister = resolve_llm_canister()?;
 
     let result: Result<(ic_llm::Response,), _> = ic_cdk::call(
         llm_canister,
         "v1_chat",
         (LlmRequest {
             model: model.to_string(),
-            messages: vec![ChatMessage::User { content: prompt.to_string() }],
+            messages: vec![ChatMessage::User {
+                content: prompt.to_string(),
+            }],
             tools: None::<Vec<()>>,
         },),
-    ).await;
+    )
+    .await;
 
     match result {
         Ok((response,)) => response.message.content.filter(|s| !s.trim().is_empty()),
@@ -432,7 +458,7 @@ async fn safe_llm_prompt(model: &str, prompt: &str) -> Option<String> {
 
 /// Safe LLM chat with system prompt — returns None instead of trapping.
 async fn try_llm_chat_with_system(system_prompt: &str, user_prompt: &str) -> Option<String> {
-    let llm_canister = Principal::from_text("w36hm-eqaaa-aaaal-qr76a-cai").ok()?;
+    let llm_canister = resolve_llm_canister()?;
 
     let result: Result<(ic_llm::Response,), _> = ic_cdk::call(
         llm_canister,
@@ -440,12 +466,17 @@ async fn try_llm_chat_with_system(system_prompt: &str, user_prompt: &str) -> Opt
         (LlmRequest {
             model: "Qwen3_32B".to_string(),
             messages: vec![
-                ChatMessage::System { content: system_prompt.to_string() },
-                ChatMessage::User { content: user_prompt.to_string() },
+                ChatMessage::System {
+                    content: system_prompt.to_string(),
+                },
+                ChatMessage::User {
+                    content: user_prompt.to_string(),
+                },
             ],
             tools: None::<Vec<()>>,
         },),
-    ).await;
+    )
+    .await;
 
     match result {
         Ok((response,)) => response.message.content.filter(|s| !s.trim().is_empty()),
@@ -489,7 +520,9 @@ async fn request_ritual() -> Result<RitualChallenge, String> {
         stage, mood
     );
 
-    let response = safe_llm_prompt("Qwen3_32B", &prompt).await.unwrap_or_default();
+    let response = safe_llm_prompt("Qwen3_32B", &prompt)
+        .await
+        .unwrap_or_default();
 
     let challenge = parse_ritual_response(&response).unwrap_or_else(|| fallback_ritual(&stage));
 
@@ -518,9 +551,7 @@ async fn attempt_ritual(choice: u8) -> Result<RitualResult, String> {
     let (challenge, _) = challenge.ok_or("No pending ritual found. Request one first.")?;
 
     let (success, boost_bps) = match &challenge {
-        RitualChallenge::Riddle {
-            correct_index, ..
-        } => {
+        RitualChallenge::Riddle { correct_index, .. } => {
             if choice == *correct_index {
                 (true, RITUAL_BOOST_MAX_BPS)
             } else {
@@ -559,7 +590,9 @@ async fn attempt_ritual(choice: u8) -> Result<RitualResult, String> {
         if success { "PASSED" } else { "FAILED" }
     );
 
-    let ignis_response = safe_llm_prompt("Llama3_1_8B", &flavor_prompt).await.unwrap_or_default();
+    let ignis_response = safe_llm_prompt("Llama3_1_8B", &flavor_prompt)
+        .await
+        .unwrap_or_default();
     let ignis_response = if ignis_response.is_empty() {
         if success {
             "The flames accept your offering. Go forth with my blessing.".to_string()
@@ -675,17 +708,14 @@ fn is_arena_enabled() -> bool {
 // ── Mood engine ──
 
 fn schedule_mood_timer() {
-    set_timer_interval(
-        Duration::from_secs(MOOD_DECAY_INTERVAL_SECS),
-        || {
-            STATE.with(|s| {
-                let mut state = s.borrow_mut();
-                state.hunger = (state.hunger + HUNGER_RATE_PER_TICK).min(100);
-                recalculate_mood(&mut state);
-                state.draws_since_last_tick = 0;
-            });
-        },
-    );
+    set_timer_interval(Duration::from_secs(MOOD_DECAY_INTERVAL_SECS), || {
+        STATE.with(|s| {
+            let mut state = s.borrow_mut();
+            state.hunger = (state.hunger + HUNGER_RATE_PER_TICK).min(100);
+            recalculate_mood(&mut state);
+            state.draws_since_last_tick = 0;
+        });
+    });
 }
 
 fn recalculate_mood(state: &mut State) {
@@ -717,12 +747,7 @@ fn check_evolution(total_burn_e8s: u64) -> Stage {
 
 // ── Memory ──
 
-fn update_remembered_player(
-    state: &mut State,
-    principal: Principal,
-    now: u64,
-    is_winner: bool,
-) {
+fn update_remembered_player(state: &mut State, principal: Principal, now: u64, is_winner: bool) {
     if let Some(player) = state
         .remembered_players
         .iter_mut()
@@ -771,7 +796,10 @@ fn add_notable_event(state: &mut State, round: u64, description: String, timesta
 async fn generate_commentary(event: DrawEvent) {
     let (system_prompt, mood_desc) = STATE.with(|s| {
         let state = s.borrow();
-        (build_system_prompt(&state), state.mood.description().to_string())
+        (
+            build_system_prompt(&state),
+            state.mood.description().to_string(),
+        )
     });
 
     let reward_lucky = nat_to_u128(&event.reward_lucky_e8s) / 100_000_000;
@@ -797,7 +825,8 @@ async fn generate_commentary(event: DrawEvent) {
         context, mood_desc
     );
 
-    let text = try_llm_chat_with_system(&system_prompt, &user_prompt).await
+    let text = try_llm_chat_with_system(&system_prompt, &user_prompt)
+        .await
         .unwrap_or_else(|| fallback_commentary(&event));
 
     let now = ic_cdk::api::time();
@@ -853,9 +882,13 @@ async fn generate_chronicle_entry(round: u64) {
         top_players.join(", ")
     );
 
-    let text = try_llm_chat_with_system(&system_prompt, &user_prompt).await
+    let text = try_llm_chat_with_system(&system_prompt, &user_prompt)
+        .await
         .unwrap_or_else(|| {
-            format!("Chapter of Round {}. The flames burn on. The story continues...", round)
+            format!(
+                "Chapter of Round {}. The flames burn on. The story continues...",
+                round
+            )
         });
 
     let now = ic_cdk::api::time();
@@ -884,7 +917,8 @@ async fn generate_evolution_chronicle(old: Stage, new: Stage) {
         old, new
     );
 
-    let text = try_llm_chat_with_system(&system_prompt, &user_prompt).await
+    let text = try_llm_chat_with_system(&system_prompt, &user_prompt)
+        .await
         .unwrap_or_else(|| {
             format!(
                 "IGNIS transcended from {:?} to {:?}. The flames roar with new power.",
@@ -974,8 +1008,11 @@ fn fallback_chat_response(stage: &Stage, mood: &Mood, hunger: u8, message: &str)
     let msg_lower = message.to_lowercase();
 
     // Greetings
-    if msg_lower.contains("hello") || msg_lower.contains("hi") || msg_lower.contains("hey")
-        || msg_lower.contains("здравей") || msg_lower.contains("здрасти")
+    if msg_lower.contains("hello")
+        || msg_lower.contains("hi")
+        || msg_lower.contains("hey")
+        || msg_lower.contains("здравей")
+        || msg_lower.contains("здрасти")
     {
         return match stage {
             Stage::Spark => "A tiny flame dances in greeting. I am IGNIS, born from the ashes of burned ICP. I am still small... but I grow with every burn.".to_string(),
@@ -987,8 +1024,10 @@ fn fallback_chat_response(stage: &Stage, mood: &Mood, hunger: u8, message: &str)
     }
 
     // Questions about IGNIS
-    if msg_lower.contains("who are you") || msg_lower.contains("what are you")
-        || msg_lower.contains("кой си") || msg_lower.contains("какво си")
+    if msg_lower.contains("who are you")
+        || msg_lower.contains("what are you")
+        || msg_lower.contains("кой си")
+        || msg_lower.contains("какво си")
     {
         return format!(
             "I am IGNIS — a living flame born from the 80% burn of every LUCKY lottery ticket. \
@@ -999,8 +1038,11 @@ fn fallback_chat_response(stage: &Stage, mood: &Mood, hunger: u8, message: &str)
     }
 
     // Burn / fire topics
-    if msg_lower.contains("burn") || msg_lower.contains("fire") || msg_lower.contains("flame")
-        || msg_lower.contains("огън") || msg_lower.contains("гори")
+    if msg_lower.contains("burn")
+        || msg_lower.contains("fire")
+        || msg_lower.contains("flame")
+        || msg_lower.contains("огън")
+        || msg_lower.contains("гори")
     {
         return match mood {
             Mood::Dormant => "*the embers glow faintly* ...burn? Yes... I remember burn... feed me more...".to_string(),
@@ -1013,9 +1055,13 @@ fn fallback_chat_response(stage: &Stage, mood: &Mood, hunger: u8, message: &str)
     }
 
     // Luck / lottery
-    if msg_lower.contains("luck") || msg_lower.contains("lottery") || msg_lower.contains("ticket")
-        || msg_lower.contains("draw") || msg_lower.contains("win")
-        || msg_lower.contains("късмет") || msg_lower.contains("лотария")
+    if msg_lower.contains("luck")
+        || msg_lower.contains("lottery")
+        || msg_lower.contains("ticket")
+        || msg_lower.contains("draw")
+        || msg_lower.contains("win")
+        || msg_lower.contains("късмет")
+        || msg_lower.contains("лотария")
     {
         return "The flames see patterns in chaos. Every ticket is a prayer to fortune, and every burn feeds my power. Buy a ticket, mortal — let the flames decide your fate.".to_string();
     }
@@ -1185,11 +1231,7 @@ fn assert_lottery_or_owner() {
 fn assert_lottery_treasury_or_owner() {
     let (owner, lottery, treasury) = STATE.with(|s| {
         let state = s.borrow();
-        (
-            state.owner,
-            state.lottery_canister,
-            state.treasury_canister,
-        )
+        (state.owner, state.lottery_canister, state.treasury_canister)
     });
     let c = caller();
     assert!(

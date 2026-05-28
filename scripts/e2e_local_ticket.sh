@@ -14,20 +14,20 @@ SUBACCOUNT="$(dfx canister call lottery get_deposit_subaccount "(principal \"$DE
   | sed -E 's/^[[:space:]]*\([[:space:]]*//; s/,[[:space:]]*\)[[:space:]]*$//')"
 
 echo "== Funding local test account =="
-dfx canister call icp_ledger_mock faucet "(record { owner = principal \"$DEV\"; subaccount = null }, 1_000_000)"
+dfx canister call icp_ledger_mock faucet "(record { owner = principal \"$DEV\"; subaccount = null }, 100_000_000)"
 
 echo "== Paying ticket deposit =="
 dfx canister call icp_ledger_mock icrc1_transfer "(record {
   from_subaccount = null;
   to = record { owner = principal \"$TREASURY_ID\"; subaccount = opt $SUBACCOUNT };
-  amount = 130_000;
+  amount = 10_030_000;
   fee = opt 10_000;
   memo = null;
   created_at_time = null;
 })"
 
 echo "== Buying ticket =="
-dfx canister call lottery buy_ticket
+dfx canister call lottery buy_ticket "(10_000_000 : nat64)"
 
 echo "== Treasury stats =="
 dfx canister call treasury get_stats

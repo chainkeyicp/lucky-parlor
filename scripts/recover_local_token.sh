@@ -29,4 +29,5 @@ dfx canister call treasury configure "(record {
   dev_account = opt record { owner = principal \"$DEV\"; subaccount = null };
   liquidity_account = opt record { owner = principal \"$TREASURY_ID\"; subaccount = null };
   burn_account = opt record { owner = principal \"aaaaa-aa\"; subaccount = null };
+  topup_canisters = null;
 })"

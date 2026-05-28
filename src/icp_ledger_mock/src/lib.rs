@@ -174,4 +174,3 @@ fn get_transactions() -> Vec<Transfer> {
 fn nat_to_u128(value: &Nat) -> Option<u128> {
     value.0.clone().try_into().ok()
 }
-
