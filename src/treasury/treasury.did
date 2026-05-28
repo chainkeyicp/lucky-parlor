@@ -23,7 +23,6 @@ type ConfigureArgs = record {
   lottery_canister : opt principal;
   icp_ledger : opt principal;
   dev_account : opt Account;
-  liquidity_account : opt Account;
   burn_account : opt Account;
   topup_canisters : opt vec TopUpTarget;
 };

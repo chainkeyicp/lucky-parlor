@@ -406,7 +406,7 @@ async fn try_llm_chat(message: &str) -> Option<String> {
         llm_canister,
         "v1_chat",
         (LlmRequest {
-            model: "Qwen3_32B".to_string(),
+            model: "llama4-scout".to_string(),
             messages: vec![
                 ChatMessage::System {
                     content: system_prompt,
@@ -422,7 +422,10 @@ async fn try_llm_chat(message: &str) -> Option<String> {
 
     match result {
         Ok((response,)) => response.message.content,
-        Err(_) => None,
+        Err((code, msg)) => {
+            ic_cdk::println!("LLM call failed: code={:?} msg={}", code, msg);
+            None
+        }
     }
 }
 
@@ -452,7 +455,10 @@ async fn safe_llm_prompt(model: &str, prompt: &str) -> Option<String> {
 
     match result {
         Ok((response,)) => response.message.content.filter(|s| !s.trim().is_empty()),
-        Err(_) => None,
+        Err((code, msg)) => {
+            ic_cdk::println!("safe_llm_prompt failed: code={:?} msg={}", code, msg);
+            None
+        }
     }
 }
 
@@ -464,7 +470,7 @@ async fn try_llm_chat_with_system(system_prompt: &str, user_prompt: &str) -> Opt
         llm_canister,
         "v1_chat",
         (LlmRequest {
-            model: "Qwen3_32B".to_string(),
+            model: "llama4-scout".to_string(),
             messages: vec![
                 ChatMessage::System {
                     content: system_prompt.to_string(),
@@ -480,7 +486,10 @@ async fn try_llm_chat_with_system(system_prompt: &str, user_prompt: &str) -> Opt
 
     match result {
         Ok((response,)) => response.message.content.filter(|s| !s.trim().is_empty()),
-        Err(_) => None,
+        Err((code, msg)) => {
+            ic_cdk::println!("try_llm_chat_with_system failed: code={:?} msg={}", code, msg);
+            None
+        }
     }
 }
 
@@ -520,7 +529,7 @@ async fn request_ritual() -> Result<RitualChallenge, String> {
         stage, mood
     );
 
-    let response = safe_llm_prompt("Qwen3_32B", &prompt)
+    let response = safe_llm_prompt("llama4-scout", &prompt)
         .await
         .unwrap_or_default();
 
@@ -537,7 +546,7 @@ async fn request_ritual() -> Result<RitualChallenge, String> {
 }
 
 #[update]
-async fn attempt_ritual(choice: u8) -> Result<RitualResult, String> {
+fn attempt_ritual(choice: u8) -> Result<RitualResult, String> {
     let user = caller();
     let now = ic_cdk::api::time();
 
@@ -576,31 +585,10 @@ async fn attempt_ritual(choice: u8) -> Result<RitualResult, String> {
         });
     }
 
-    let (stage, mood) = STATE.with(|s| {
-        let state = s.borrow();
-        (state.stage.clone(), state.mood.clone())
-    });
-
-    // Generate flavor response
-    let flavor_prompt = format!(
-        "You are IGNIS at {:?} stage, mood {:?}. A player {} your ritual challenge. \
-         Write 1 short dramatic sentence as response. Under 50 words.",
-        stage,
-        mood,
-        if success { "PASSED" } else { "FAILED" }
-    );
-
-    let ignis_response = safe_llm_prompt("Llama3_1_8B", &flavor_prompt)
-        .await
-        .unwrap_or_default();
-    let ignis_response = if ignis_response.is_empty() {
-        if success {
-            "The flames accept your offering. Go forth with my blessing.".to_string()
-        } else {
-            "The flames flicker with disappointment. Perhaps next time, mortal.".to_string()
-        }
+    let ignis_response = if success {
+        "🔥 The flames accept your offering. Go forth with my blessing! ✨".to_string()
     } else {
-        ignis_response
+        "💫 The flames flicker with disappointment. Perhaps next time, mortal.".to_string()
     };
 
     Ok(RitualResult {
@@ -982,6 +970,8 @@ fn build_system_prompt(state: &State) -> String {
          {}\
          \nRules: Stay in character. Never break the fourth wall. \
          Never mention being an AI or LLM. You ARE fire given consciousness. \
+         Use fire/flame emoji (🔥✨💫🌟⚡) to express actions instead of *asterisk actions*. \
+         Example: instead of '*flicker*' write '🔥', instead of '*warm glow*' write '✨'. \
          Keep responses under 200 words unless asked for a chronicle.",
         state.stage,
         state.stage.personality(),

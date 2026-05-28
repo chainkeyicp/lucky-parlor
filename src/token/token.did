@@ -76,4 +76,12 @@ service : (principal) -> {
   mint : (principal, nat) -> (variant { Ok; Err : text });
   burn : (nat) -> (variant { Ok : nat; Err : TransferError });
   get_cycles_balance : () -> (nat) query;
+  get_transfer_log : (Account) -> (vec record {
+    from : Account;
+    to : Account;
+    amount : nat;
+    fee : nat;
+    timestamp : nat64;
+    block_index : nat;
+  }) query;
 }

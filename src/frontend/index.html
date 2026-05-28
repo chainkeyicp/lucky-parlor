@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LUCKY Parlor</title>
+  <title>PARLOR</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,800&family=Instrument+Serif&family=JetBrains+Mono:wght@400;700;800&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -16,8 +16,8 @@
         <svg width="26" height="26" viewBox="-15 -15 30 30"><g fill="#FBF3E2" stroke="#FBF3E2" stroke-width="1"><ellipse cx="0" cy="-7" rx="5" ry="7"/><ellipse cx="7" cy="0" rx="7" ry="5"/><ellipse cx="0" cy="7" rx="5" ry="7"/><ellipse cx="-7" cy="0" rx="7" ry="5"/><circle cx="0" cy="0" r="2.2" fill="#FFC857" stroke="none"/></g></svg>
       </div>
       <div class="brand-name">
-        <span>LUCKY</span>
-        <em>parlor</em>
+        <span>PARLOR</span>
+        <em>test</em>
       </div>
     </div>
 
@@ -92,7 +92,7 @@
               <span class="num" id="buyRound">Round #0</span>
               <span class="sub" id="buyStatus">open</span>
             </div>
-            <span class="sticker cherry" style="transform:rotate(2deg)">60s draws</span>
+            <span class="sticker cherry" style="transform:rotate(2deg)">10min draws</span>
           </div>
 
           <div class="buy-prize">
@@ -103,7 +103,7 @@
               <span class="label">Your reward preview</span>
               <div class="amount-row">
                 <span class="amount" id="rewardText"><span>50</span></span>
-                <span class="unit">LUCKY</span>
+                <span class="unit">PARLOR</span>
               </div>
               <div class="boost">+ staking &amp; streak multipliers</div>
             </div>
@@ -160,7 +160,7 @@
           </div>
           <div class="status-line">
             <span class="lbl">Wallet</span>
-            <span class="v" id="statusWallet">0 LUCKY</span>
+            <span class="v" id="statusWallet">0 PARLOR</span>
           </div>
 
           <div style="display:flex; gap:0.4rem; margin-top:0.4rem">
@@ -192,7 +192,7 @@
           <div class="card tinted-yellow ritual-mini" id="parlorRitualCard">
             <div class="card-head" style="margin-bottom:0.4rem">
               <div>
-                <span class="eyebrow">Today's ritual</span>
+                <span class="eyebrow">Ritual</span>
                 <h2 style="margin-top:0.3rem">Riddle for a boost</h2>
               </div>
             </div>
@@ -216,14 +216,14 @@
           <div class="card burn-total">
             <span class="eyebrow" style="justify-content:center">
               <svg width="14" height="14" viewBox="0 0 22 22"><path d="M11 2 C 13 6, 16 8, 16 12 C 16 16, 13.5 19, 11 19 C 8.5 19, 6 16, 6 12 C 6 9, 8 7, 8.5 5 C 9 7, 10 7, 10 5 C 10.3 4, 10.5 3, 11 2 Z" fill="#E54B4B" stroke="#1A2A1F" stroke-width="2" stroke-linejoin="round"/></svg>
-              Total LUCKY burned
+              Total PARLOR burned
             </span>
             <div>
               <span class="num" id="burnTotalNum">0</span>
-              <span class="unit">LUCKY</span>
+              <span class="unit">PARLOR</span>
             </div>
             <div class="since">
-              Burn pool: <strong id="burnPoolNum">0</strong> LUCKY &middot; Next burn: <strong id="nextBurnText">&mdash;</strong>
+              Burn pool: <strong id="burnPoolNum">0</strong> PARLOR &middot; Next burn: <strong id="nextBurnText">&mdash;</strong>
             </div>
           </div>
         </div>
@@ -279,7 +279,7 @@
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.7rem; margin-top:0.4rem">
             <div style="padding:0.6rem 0.85rem; background:var(--paper-card); border:2px solid var(--ink); border-radius:var(--radius-sm)">
               <div style="font-size:0.7rem; font-weight:800; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.1em">Total burned</div>
-              <div class="display" style="font-size:1.05rem; margin-top:0.15rem" id="ignisBurnTotal">0 LUCKY</div>
+              <div class="display" style="font-size:1.05rem; margin-top:0.15rem" id="ignisBurnTotal">0 PARLOR</div>
             </div>
             <div style="padding:0.6rem 0.85rem; background:var(--paper-card); border:2px solid var(--ink); border-radius:var(--radius-sm)">
               <div style="font-size:0.7rem; font-weight:800; color:var(--ink-soft); text-transform:uppercase; letter-spacing:0.1em">Arena wins</div>
@@ -313,7 +313,7 @@
         <div class="card tinted-yellow">
           <div class="card-head">
             <div>
-              <span class="eyebrow">Daily ritual</span>
+              <span class="eyebrow">Ritual</span>
               <h2 style="margin-top:0.3rem">A little riddle for a little boost</h2>
             </div>
           </div>
@@ -335,37 +335,6 @@
         </div>
       </section>
 
-      <!-- Commentary -->
-      <section class="card tinted-sky" style="margin-top:1rem">
-        <div class="card-head">
-          <div>
-            <span class="eyebrow">Draw commentary</span>
-            <h2 style="margin-top:0.3rem">The flame narrates the draws</h2>
-          </div>
-          <button id="ignisCommentaryRefresh" class="btn sm ghost">Refresh</button>
-        </div>
-        <div id="ignisCommentaryList" class="ignis-commentary-list">
-          <div class="empty">No commentaries yet. IGNIS will speak after the next draw.</div>
-        </div>
-      </section>
-
-      <!-- Chronicle -->
-      <section class="card" style="margin-top:1rem">
-        <div class="card-head">
-          <div>
-            <span class="eyebrow">The living chronicle</span>
-            <h2 style="margin-top:0.3rem">Ignis remembers</h2>
-          </div>
-          <div class="chronicle-nav">
-            <button id="chroniclePrev" class="btn sm ghost" disabled>&lt;</button>
-            <span id="chroniclePage">Page 1</span>
-            <button id="chronicleNext" class="btn sm ghost">&gt;</button>
-          </div>
-        </div>
-        <div id="ignisChronicleList" class="ignis-chronicle-list">
-          <div class="empty">The chronicle has not yet begun...</div>
-        </div>
-      </section>
     </div>
 
     <!-- ══════════ STAKING PAGE ══════════ -->
@@ -373,7 +342,7 @@
       <section style="padding:1.5rem 0 1rem">
         <span class="eyebrow">Staking</span>
         <h1 style="margin-top:0.4rem; font-size:clamp(2.2rem, 4vw, 3rem)">
-          Stake LUCKY, multiply <span class="serif" style="color:var(--cherry)">your win</span>.
+          Stake PARLOR, multiply <span class="serif" style="color:var(--cherry)">your win</span>.
         </h1>
         <p style="color:var(--ink-soft); margin-top:0.5rem; max-width:56ch">
           Staking does not change your odds. It multiplies the reward if your ticket is drawn. Each stake locks for 24h.
@@ -409,16 +378,16 @@
 
         <div style="text-align:center; padding:0.6rem 0 0.8rem; border-bottom:1.5px dashed rgba(26,42,31,0.15); margin-bottom:1rem">
           <div style="font-size:0.72rem; font-weight:800; text-transform:uppercase; letter-spacing:0.12em; color:var(--ink-soft)">Available to stake</div>
-          <div style="font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:1.6rem; color:var(--cherry)" id="stakeLiquid">0 LUCKY</div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif; font-weight:800; font-size:1.6rem; color:var(--cherry)" id="stakeLiquid">0 PARLOR</div>
         </div>
 
         <div class="tier-track" id="tierTrack">
           <div class="tier" data-tier="0"><div class="x">1.0x</div><div class="amt">starter</div></div>
-          <div class="tier" data-tier="1000"><div class="x">1.1x</div><div class="amt">1k LUCKY</div></div>
-          <div class="tier" data-tier="5000"><div class="x">1.25x</div><div class="amt">5k LUCKY</div></div>
-          <div class="tier" data-tier="10000"><div class="x">1.5x</div><div class="amt">10k LUCKY</div></div>
-          <div class="tier" data-tier="25000"><div class="x">2.0x</div><div class="amt">25k LUCKY</div></div>
-          <div class="tier" data-tier="50000"><div class="x">3.0x</div><div class="amt">50k LUCKY</div></div>
+          <div class="tier" data-tier="1000"><div class="x">1.1x</div><div class="amt">1k PARLOR</div></div>
+          <div class="tier" data-tier="5000"><div class="x">1.25x</div><div class="amt">5k PARLOR</div></div>
+          <div class="tier" data-tier="10000"><div class="x">1.5x</div><div class="amt">10k PARLOR</div></div>
+          <div class="tier" data-tier="25000"><div class="x">2.0x</div><div class="amt">25k PARLOR</div></div>
+          <div class="tier" data-tier="50000"><div class="x">3.0x</div><div class="amt">50k PARLOR</div></div>
         </div>
 
         <div style="display:grid; grid-template-columns:minmax(0,1fr) auto; gap:0.8rem; margin-top:1.4rem; align-items:end">
@@ -426,7 +395,7 @@
             <span class="label">Amount to stake</span>
             <div style="display:flex; gap:0.5rem; align-items:center">
               <input id="stakeAmount" type="number" min="1" step="100" value="1000">
-              <span style="font-weight:800; color:var(--ink-soft)">LUCKY</span>
+              <span style="font-weight:800; color:var(--ink-soft)">PARLOR</span>
             </div>
           </div>
           <button id="stakeBtn" class="btn primary xl" disabled>
@@ -519,17 +488,17 @@
         </div>
         <div class="coin-card lucky">
           <svg class="coin-svg" viewBox="0 0 110 110"><circle cx="55" cy="55" r="44" fill="#E54B4B" stroke="#2A1B0E" stroke-width="3"/><g transform="translate(55 55)" fill="#FBF3E2" stroke="#2A1B0E" stroke-width="2"><ellipse cx="0" cy="-13" rx="9" ry="13"/><ellipse cx="13" cy="0" rx="13" ry="9"/><ellipse cx="0" cy="13" rx="9" ry="13"/><ellipse cx="-13" cy="0" rx="13" ry="9"/><circle cx="0" cy="0" r="4" fill="#FFC857" stroke="#2A1B0E"/></g></svg>
-          <div class="label">LUCKY liquid</div>
+          <div class="label">PARLOR liquid</div>
           <div class="value" id="walletLucky">0</div>
         </div>
         <div class="coin-card staked">
           <svg class="coin-svg" viewBox="0 0 110 110"><circle cx="55" cy="55" r="44" fill="#3F8F60" stroke="#2A1B0E" stroke-width="3"/><g stroke="#2A1B0E" stroke-width="2"><ellipse cx="55" cy="72" rx="22" ry="6" fill="#FFC857"/><rect x="33" y="60" width="44" height="12" fill="#FFC857" stroke="none"/><ellipse cx="55" cy="60" rx="22" ry="6" fill="#FFE3A2"/><ellipse cx="55" cy="48" rx="20" ry="5.5" fill="#FFE3A2"/><rect x="35" y="40" width="40" height="8" fill="#FFE3A2" stroke="none"/><ellipse cx="55" cy="40" rx="20" ry="5.5" fill="#FFF"/></g></svg>
-          <div class="label">LUCKY staked</div>
+          <div class="label">PARLOR staked</div>
           <div class="value" id="walletStaked">0</div>
         </div>
         <div class="coin-card total">
           <svg class="coin-svg" viewBox="0 0 110 110"><circle cx="55" cy="55" r="44" fill="#8E5BD9" stroke="#2A1B0E" stroke-width="3"/><g fill="#FBF3E2" stroke="#2A1B0E" stroke-width="2"><polygon points="55,28 64,50 86,52 69,67 75,90 55,77 35,90 41,67 24,52 46,50"/></g></svg>
-          <div class="label">LUCKY total</div>
+          <div class="label">PARLOR total</div>
           <div class="value" id="walletTotal">0</div>
         </div>
       </section>
@@ -553,7 +522,7 @@
                 </button>
                 <div class="custom-select-menu" id="walletActionMenu">
                   <button class="custom-select-option active" data-value="send-icp" type="button">Send ICP</button>
-                  <button class="custom-select-option" data-value="send-lucky" type="button">Send LUCKY</button>
+                  <button class="custom-select-option" data-value="send-lucky" type="button">Send PARLOR</button>
                 </div>
                 <input type="hidden" id="walletAction" value="send-icp">
               </div>
@@ -593,7 +562,7 @@
     <div style="display:flex; align-items:center; gap:0.7rem">
       <svg width="20" height="20" viewBox="-15 -15 30 30"><g fill="#2A6B47" stroke="#1A2A1F" stroke-width="1.5"><ellipse cx="0" cy="-7" rx="5" ry="7"/><ellipse cx="7" cy="0" rx="7" ry="5"/><ellipse cx="0" cy="7" rx="5" ry="7"/><ellipse cx="-7" cy="0" rx="7" ry="5"/><circle cx="0" cy="0" r="2.2" fill="#FFC857" stroke="#1A2A1F" stroke-width="1"/></g></svg>
       <span style="font-size:0.84rem; color:var(--ink-soft); font-weight:600">
-        LUCKY is on the Internet Computer &middot; 60s draws &middot; the flame keeps the books.
+        PARLOR is on the Internet Computer &middot; 10min draws &middot; the flame keeps the books.
       </span>
     </div>
     <div style="display:flex; gap:0.4rem">

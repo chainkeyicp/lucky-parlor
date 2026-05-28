@@ -70,7 +70,6 @@ echo "== Configuring canisters =="
 
 # TODO: Update these principals before production launch
 DEV_REVENUE_PRINCIPAL="$DEV_PRINCIPAL"
-LIQUIDITY_PRINCIPAL="$TREASURY_ID"
 
 dfx canister call token set_minting_account \
   "(principal \"$LOTTERY_ID\")" --network $NETWORK
@@ -86,7 +85,6 @@ dfx canister call treasury configure "(record {
   lottery_canister = opt principal \"$LOTTERY_ID\";
   icp_ledger = opt principal \"$REAL_LEDGER\";
   dev_account = opt record { owner = principal \"$DEV_REVENUE_PRINCIPAL\"; subaccount = null };
-  liquidity_account = opt record { owner = principal \"$LIQUIDITY_PRINCIPAL\"; subaccount = null };
   burn_account = null;
   topup_canisters = opt vec {
     record { canister_id = principal \"$LOTTERY_ID\"; name = \"Lottery\"; share_bps = (4500 : nat16) };

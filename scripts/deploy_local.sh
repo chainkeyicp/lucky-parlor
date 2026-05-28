@@ -54,7 +54,6 @@ dfx canister call treasury configure "(record {
   lottery_canister = opt principal \"$LOTTERY_ID\";
   icp_ledger = opt principal \"$LEDGER_ID\";
   dev_account = opt record { owner = principal \"$DEV_PRINCIPAL\"; subaccount = null };
-  liquidity_account = opt record { owner = principal \"$TREASURY_ID\"; subaccount = null };
   burn_account = opt record { owner = principal \"aaaaa-aa\"; subaccount = null };
   topup_canisters = null;
 })"

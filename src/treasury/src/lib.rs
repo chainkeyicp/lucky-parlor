@@ -6,8 +6,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 const DEV_BPS: u64 = 500;
-const LIQUIDITY_BPS: u64 = 1_500;
-const BURN_BPS: u64 = 8_000;
+const CYCLES_BPS: u64 = 9_500; // 95% — merged liquidity (15%) + burn (80%) → all to cycles top-up
 const DEFAULT_ICP_FEE_E8S: u64 = 10_000;
 const CMC_PRINCIPAL: &str = "rkp4c-7iaaa-aaaaa-aaaca-cai";
 const TOPUP_MEMO: u64 = 0x50555054; // "TPUP" — CMC convention
@@ -23,7 +22,6 @@ pub struct ConfigureArgs {
     pub lottery_canister: Option<Principal>,
     pub icp_ledger: Option<Principal>,
     pub dev_account: Option<Account>,
-    pub liquidity_account: Option<Account>,
     pub burn_account: Option<Account>,
     pub topup_canisters: Option<Vec<TopUpTarget>>,
 }
@@ -294,9 +292,6 @@ fn configure(args: ConfigureArgs) {
             if let Some(account) = args.dev_account {
                 state.dev_account = Some(account);
             }
-            if let Some(account) = args.liquidity_account {
-                state.liquidity_account = Some(account);
-            }
             if let Some(account) = args.burn_account {
                 state.burn_account = Some(account);
             }
@@ -324,7 +319,6 @@ async fn claim_ticket_payment(
         lottery,
         ledger,
         dev_account,
-        liquidity_account,
         burn_account,
         topup_enabled,
         existing_pending,
@@ -335,7 +329,6 @@ async fn claim_ticket_payment(
             state.lottery_canister,
             state.icp_ledger,
             state.dev_account.clone(),
-            state.liquidity_account.clone(),
             state.burn_account.clone(),
             !state.topup_canisters.is_empty(),
             state.pending_splits.get(&deposit_subaccount).cloned(),
@@ -360,9 +353,8 @@ async fn claim_ticket_payment(
 
     let ledger = ledger.ok_or("ICP ledger not configured")?;
     let dev_account = dev_account.ok_or("Development account not configured")?;
-    let liquidity_account = liquidity_account.ok_or("Liquidity account not configured")?;
     if !topup_enabled && burn_account.is_none() {
-        return Err("Burn account not configured".to_string());
+        return Err("Burn/cycles account not configured".to_string());
     }
     let ledger_fee = get_ledger_fee(ledger).await.unwrap_or(DEFAULT_ICP_FEE_E8S);
 
@@ -371,7 +363,6 @@ async fn claim_ticket_payment(
             ledger,
             deposit_subaccount.clone(),
             dev_account,
-            liquidity_account,
             burn_account,
             ledger_fee,
         )
@@ -419,7 +410,7 @@ async fn claim_ticket_payment(
                 buyer,
                 result: result.clone(),
                 dev_done: false,
-                liquidity_done: false,
+                liquidity_done: true, // no liquidity leg — merged into cycles
                 burn_done: false,
                 topups: Vec::new(),
             },
@@ -429,18 +420,29 @@ async fn claim_ticket_payment(
         state.stats.pending_distributions += 1;
     });
 
-    let complete = distribute_pending_split(
+    // Phase 1: Do the dev transfer synchronously (fast — single ICRC1 transfer)
+    if transfer_from_deposit(
         ledger,
-        deposit_subaccount,
-        dev_account,
-        liquidity_account,
-        burn_account,
+        deposit_subaccount.clone(),
+        dev_account.clone(),
+        result.dev_e8s,
         ledger_fee,
     )
-    .await;
+    .await
+    .is_ok()
+    {
+        mark_split_done(&deposit_subaccount, SplitLeg::Dev, result.dev_e8s);
+    }
 
+    // Phase 2: Spawn cycles top-ups asynchronously (slow — multiple CMC transfers)
+    let sub = deposit_subaccount.clone();
+    ic_cdk::spawn(async move {
+        distribute_pending_split(ledger, sub, dev_account, burn_account, ledger_fee).await;
+    });
+
+    // Return immediately — top-ups continue in background
     let mut result = result;
-    result.distribution_complete = complete;
+    result.distribution_complete = false;
     Ok(result)
 }
 
@@ -466,12 +468,11 @@ async fn retry_pending_distribution(deposit_subaccount: Vec<u8>) -> Result<bool,
     });
     let _guard = ProcessingGuard(deposit_subaccount.clone());
 
-    let (ledger, dev_account, liquidity_account, burn_account) = STATE.with(|s| {
+    let (ledger, dev_account, burn_account) = STATE.with(|s| {
         let state = s.borrow();
         (
             state.icp_ledger,
             state.dev_account.clone(),
-            state.liquidity_account.clone(),
             state.burn_account.clone(),
         )
     });
@@ -482,7 +483,6 @@ async fn retry_pending_distribution(deposit_subaccount: Vec<u8>) -> Result<bool,
         ledger,
         deposit_subaccount,
         dev_account.ok_or("Development account not configured")?,
-        liquidity_account.ok_or("Liquidity account not configured")?,
         burn_account,
         ledger_fee,
     )
@@ -534,7 +534,7 @@ fn get_pending_topups(deposit_subaccount: Vec<u8>) -> Vec<TopUpStatus> {
 
 #[query]
 fn get_split() -> (u64, u64, u64) {
-    (DEV_BPS, LIQUIDITY_BPS, BURN_BPS)
+    (DEV_BPS, 0, CYCLES_BPS)
 }
 
 #[query]
@@ -546,7 +546,6 @@ async fn distribute_pending_split(
     ledger: Principal,
     deposit_subaccount: Vec<u8>,
     dev_account: Account,
-    liquidity_account: Account,
     burn_account: Option<Account>,
     ledger_fee: u64,
 ) -> bool {
@@ -567,29 +566,6 @@ async fn distribute_pending_split(
         .is_ok()
     {
         mark_split_done(&deposit_subaccount, SplitLeg::Dev, pending.result.dev_e8s);
-    }
-
-    let pending = STATE.with(|s| s.borrow().pending_splits.get(&deposit_subaccount).cloned());
-    let Some(pending) = pending else {
-        return true;
-    };
-
-    if !pending.liquidity_done
-        && transfer_from_deposit(
-            ledger,
-            deposit_subaccount.clone(),
-            liquidity_account,
-            pending.result.liquidity_e8s,
-            ledger_fee,
-        )
-        .await
-        .is_ok()
-    {
-        mark_split_done(
-            &deposit_subaccount,
-            SplitLeg::Liquidity,
-            pending.result.liquidity_e8s,
-        );
     }
 
     let pending = STATE.with(|s| s.borrow().pending_splits.get(&deposit_subaccount).cloned());
@@ -650,7 +626,6 @@ async fn distribute_pending_split(
 
 enum SplitLeg {
     Dev,
-    Liquidity,
     Burn,
 }
 
@@ -662,10 +637,6 @@ fn mark_split_done(deposit_subaccount: &[u8], leg: SplitLeg, amount_e8s: u64) {
                 SplitLeg::Dev if !pending.dev_done => {
                     pending.dev_done = true;
                     state.stats.total_dev += amount_e8s;
-                }
-                SplitLeg::Liquidity if !pending.liquidity_done => {
-                    pending.liquidity_done = true;
-                    state.stats.total_liquidity += amount_e8s;
                 }
                 SplitLeg::Burn if !pending.burn_done => {
                     pending.burn_done = true;
@@ -1031,14 +1002,15 @@ async fn notify_topup_via_cmc(block_index: u64, target_canister: Principal) -> R
 
 fn split_amount(amount_e8s: u64, ledger_fee_e8s: u64, topup_enabled: bool) -> ClaimResult {
     let dev_e8s = amount_e8s * DEV_BPS / 10_000;
-    let liquidity_e8s = amount_e8s * LIQUIDITY_BPS / 10_000;
-    let burn_e8s = amount_e8s.saturating_sub(dev_e8s + liquidity_e8s);
-    let transfer_fee_count = if topup_enabled { 2 } else { 3 };
+    let burn_e8s = amount_e8s.saturating_sub(dev_e8s);
+    // When cycles top-up is enabled: 1 ICRC1 fee (dev) — legacy transfer fee comes from burn_e8s
+    // When using burn account fallback: 2 ICRC1 fees (dev + burn transfer)
+    let transfer_fee_count = if topup_enabled { 1 } else { 2 };
 
     ClaimResult {
         amount_e8s,
         dev_e8s,
-        liquidity_e8s,
+        liquidity_e8s: 0,
         burn_e8s,
         ledger_fees_e8s: ledger_fee_e8s * transfer_fee_count,
         distribution_complete: false,

@@ -10,8 +10,8 @@ const MAX_SUPPLY: u128 = 100_000_000 * ONE_LUCKY;
 const DEV_RESERVE: u128 = 10_000_000 * ONE_LUCKY;
 const REWARD_POOL: u128 = 70_000_000 * ONE_LUCKY;
 const TRANSFER_FEE: u128 = 10_000;
-const TOKEN_NAME: &str = "Lucky";
-const TOKEN_SYMBOL: &str = "LUCKY";
+const TOKEN_NAME: &str = "Parlor";
+const TOKEN_SYMBOL: &str = "PARLOR";
 const STAKE_LOCK_NANOS: u64 = 86_400 * 1_000_000_000; // 24 hours
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash)]
@@ -80,6 +80,16 @@ pub struct StakeInfo {
 }
 
 #[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
+pub struct TransferRecord {
+    pub from: Account,
+    pub to: Account,
+    pub amount: u128,
+    pub fee: u128,
+    pub timestamp: u64,
+    pub block_index: u128,
+}
+
+#[derive(CandidType, Serialize, Deserialize, Clone, Debug)]
 struct State {
     owner: Principal,
     minting_account: Option<Principal>,
@@ -88,6 +98,8 @@ struct State {
     total_minted: u128,
     rewards_minted: u128,
     next_block_index: u128,
+    #[serde(default)]
+    transfer_log: Vec<TransferRecord>,
 }
 
 // Previous format: flat u128 staked amounts
@@ -123,6 +135,7 @@ impl Default for State {
             total_minted: 0,
             rewards_minted: 0,
             next_block_index: 0,
+            transfer_log: Vec::new(),
         }
     }
 }
@@ -348,6 +361,36 @@ fn get_cycles_balance() -> u128 {
     ic_cdk::api::canister_balance128()
 }
 
+#[derive(CandidType)]
+pub struct TransferRecordView {
+    pub from: Account,
+    pub to: Account,
+    pub amount: Nat,
+    pub fee: Nat,
+    pub timestamp: u64,
+    pub block_index: Nat,
+}
+
+#[query]
+fn get_transfer_log(account: Account) -> Vec<TransferRecordView> {
+    STATE.with(|s| {
+        let state = s.borrow();
+        state
+            .transfer_log
+            .iter()
+            .filter(|r| r.from == account || r.to == account)
+            .map(|r| TransferRecordView {
+                from: r.from.clone(),
+                to: r.to.clone(),
+                amount: Nat::from(r.amount),
+                fee: Nat::from(r.fee),
+                timestamp: r.timestamp,
+                block_index: Nat::from(r.block_index),
+            })
+            .collect()
+    })
+}
+
 // ── ICRC-1 transfer ──
 
 #[update]
@@ -380,12 +423,27 @@ fn icrc1_transfer(args: TransferArgs) -> Result<Nat, TransferError> {
             });
         }
 
-        *state.balances.entry(from).or_insert(0) -= total;
-        *state.balances.entry(args.to).or_insert(0) += amount;
+        *state.balances.entry(from.clone()).or_insert(0) -= total;
+        *state.balances.entry(args.to.clone()).or_insert(0) += amount;
         state.total_minted = state.total_minted.saturating_sub(fee);
 
         let block_index = state.next_block_index;
         state.next_block_index += 1;
+
+        state.transfer_log.push(TransferRecord {
+            from,
+            to: args.to,
+            amount,
+            fee,
+            timestamp: ic_cdk::api::time(),
+            block_index,
+        });
+        // Keep last 500 records
+        let log_len = state.transfer_log.len();
+        if log_len > 500 {
+            state.transfer_log.drain(..log_len - 500);
+        }
+
         Ok(Nat::from(block_index))
     })
 }
@@ -588,6 +646,7 @@ fn migrate_old_state(old: OldState) -> State {
         total_minted: old.total_minted,
         rewards_minted: old.rewards_minted,
         next_block_index: old.next_block_index,
+        transfer_log: Vec::new(),
     }
 }
 
@@ -617,6 +676,7 @@ fn migrate_legacy_state(old: LegacyState) -> State {
         total_minted: old.total_minted,
         rewards_minted: old.rewards_minted,
         next_block_index: 0,
+        transfer_log: Vec::new(),
     }
 }
 

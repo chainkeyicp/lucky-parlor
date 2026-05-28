@@ -4,7 +4,6 @@ import { CANISTER_IDS } from "./canister-ids.js";
 
 const E8S = 100_000_000n;
 const ICP_LEDGER_FEE = 10_000n;
-const TICKET_SPLIT_FEE_COUNT = isLocal ? 3n : 2n;
 const DRAWS_PER_ICP = 144;
 const BASE_REWARD_LUCKY = 50;
 const PER_PLAYER_REWARD_LUCKY = 10;
@@ -13,6 +12,7 @@ const IDENTITY_STORAGE_KEY = "lucky.localIdentity.v1";
 const pageHost = window.location.hostname;
 const isLocal = pageHost === "localhost" || pageHost === "127.0.0.1" || pageHost.endsWith(".localhost");
 const network = isLocal ? "local" : "ic";
+const TICKET_SPLIT_FEE_COUNT = isLocal ? 2n : 1n;
 const localPort = window.location.port || "8080";
 const host = isLocal ? `${window.location.protocol}//127.0.0.1:${localPort}` : "https://ic0.app";
 const ids = CANISTER_IDS[network];
@@ -303,6 +303,7 @@ const TIMER_CIRCUMFERENCE = 2 * Math.PI * 32; // r=32
 let principal;
 let identity;
 let actors;
+let loggedIn = false;
 let lastDrawTimestamp = 0;
 let lastKnownRound = 0;
 let lastRenderedRound = 0;
@@ -467,9 +468,9 @@ function bindEvents() {
   els.ignisChatInput.addEventListener("keydown", (e) => { if (e.key === "Enter") ignisChat(); });
   els.ignisRitualRequestBtn.addEventListener("click", ignisRequestRitual);
   els.ignisRitualAgainBtn.addEventListener("click", ignisResetRitual);
-  els.ignisCommentaryRefresh.addEventListener("click", refreshIgnisCommentaries);
-  els.chroniclePrev.addEventListener("click", () => ignisChronicleNav(-1));
-  els.chronicleNext.addEventListener("click", () => ignisChronicleNav(1));
+  if (els.ignisCommentaryRefresh) els.ignisCommentaryRefresh.addEventListener("click", refreshIgnisCommentaries);
+  if (els.chroniclePrev) els.chroniclePrev.addEventListener("click", () => ignisChronicleNav(-1));
+  if (els.chronicleNext) els.chronicleNext.addEventListener("click", () => ignisChronicleNav(1));
 
   // Parlor ritual
   if (els.parlorRitualRequestBtn) els.parlorRitualRequestBtn.addEventListener("click", parlorRequestRitual);
@@ -501,6 +502,24 @@ async function getAuthClient() {
 }
 
 async function login() {
+  // If already logged in, logout
+  if (loggedIn) {
+    if (!isLocal && authClient) {
+      await authClient.logout();
+    }
+    loggedIn = false;
+    identity = null;
+    principal = null;
+    actors = null;
+    els.loginBtn.textContent = "Login";
+    els.principalText.textContent = "";
+    els.walletPrincipal.textContent = "";
+    els.buyBtn.disabled = true;
+    els.ticketSlider.disabled = true;
+    setNotice("Logged out.", "good");
+    return;
+  }
+
   if (isLocal) {
     await activateIdentity(loadOrCreateIdentity(), "Local identity active.");
   } else {
@@ -541,6 +560,8 @@ function saveIdentity(nextIdentity) {
 async function activateIdentity(nextIdentity, message) {
   identity = nextIdentity;
   principal = identity.getPrincipal();
+  loggedIn = true;
+  els.loginBtn.textContent = "Logout";
   latestStakeInfo = null;
   actors = await makeActors(identity);
   const pText = principal.toText();
@@ -626,20 +647,20 @@ async function doStake(isStake) {
   const p = ensurePrincipal();
   if (!p) return;
   const amount = luckyToE8s(els.stakeAmount.value);
-  if (amount <= 0n) { setNotice("Enter a positive LUCKY amount.", "bad"); return; }
+  if (amount <= 0n) { setNotice("Enter a positive PARLOR amount.", "bad"); return; }
   const result = isStake ? await actors.token.stake(amount) : await actors.token.unstake(amount);
   if ("Err" in result) { setNotice(result.Err, "bad"); }
-  else { setNotice(isStake ? "LUCKY staked." : "LUCKY unstaked.", "good"); }
+  else { setNotice(isStake ? "PARLOR staked." : "PARLOR unstaked.", "good"); }
   await Promise.all([refreshBalances(), refreshStaking()]);
 }
 
 async function unstakeAll() {
   const p = ensurePrincipal();
   if (!p) return;
-  if (!latestStakeInfo || latestStakeInfo.unlockable <= 0n) { setNotice("No unlockable LUCKY.", "bad"); return; }
+  if (!latestStakeInfo || latestStakeInfo.unlockable <= 0n) { setNotice("No unlockable PARLOR.", "bad"); return; }
   const result = await actors.token.unstake(latestStakeInfo.unlockable);
   if ("Err" in result) { setNotice(result.Err, "bad"); }
-  else { setNotice("All unlocked LUCKY unstaked.", "good"); }
+  else { setNotice("All unlocked PARLOR unstaked.", "good"); }
   await Promise.all([refreshBalances(), refreshStaking()]);
 }
 
@@ -648,7 +669,7 @@ async function unstakeBatch(amount) {
   if (!p) return;
   const result = await actors.token.unstake(amount);
   if ("Err" in result) { setNotice(result.Err, "bad"); }
-  else { setNotice("LUCKY unstaked.", "good"); }
+  else { setNotice("PARLOR unstaked.", "good"); }
   await Promise.all([refreshBalances(), refreshStaking()]);
 }
 
@@ -659,8 +680,22 @@ function setWalletNotice(text, kind) {
 
 async function copyPrincipal() {
   if (!principal) return;
-  try { await navigator.clipboard.writeText(principal.toText()); setWalletNotice("Copied.", "good"); }
-  catch { setWalletNotice("Copy failed.", "bad"); }
+  const text = principal.toText();
+  try {
+    await navigator.clipboard.writeText(text);
+    setWalletNotice("Copied.", "good");
+  } catch {
+    // Fallback for when Clipboard API is blocked by permissions policy
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    setWalletNotice("Copied.", "good");
+  }
 }
 
 function initCustomSelect() {
@@ -690,10 +725,10 @@ function initCustomSelect() {
 function updateSendForm() {
   const action = els.walletAction.value;
   const isIcp = action === "send-icp";
-  els.sendAmountLabel.textContent = isIcp ? "Amount (ICP)" : "Amount (LUCKY)";
+  els.sendAmountLabel.textContent = isIcp ? "Amount (ICP)" : "Amount (PARLOR)";
   els.sendAmount.step = isIcp ? "0.001" : "100";
   els.sendAmount.value = isIcp ? "0.1" : "100";
-  els.sendBtn.textContent = isIcp ? "Send ICP" : "Send LUCKY";
+  els.sendBtn.textContent = isIcp ? "Send ICP" : "Send PARLOR";
 }
 
 async function doSend() {
@@ -706,7 +741,7 @@ async function doSend() {
   const amount = isIcp ? parseUnits(els.sendAmount.value, 8) : luckyToE8s(els.sendAmount.value);
   if (amount <= 0n) { setWalletNotice("Enter a positive amount.", "bad"); return; }
   els.sendBtn.disabled = true;
-  setWalletNotice(isIcp ? "Sending ICP..." : "Sending LUCKY...", "");
+  setWalletNotice(isIcp ? "Sending ICP..." : "Sending PARLOR...", "");
   try {
     const { Principal } = await import("https://esm.sh/@dfinity/principal@2.1.3");
     const toPrincipal = Principal.fromText(toText);
@@ -716,7 +751,7 @@ async function doSend() {
       amount, fee: [], memo: [], created_at_time: [],
     });
     if ("Err" in result) throw new Error(JSON.stringify(result.Err));
-    const formatted = isIcp ? `${formatIcp(amount)} ICP` : `${formatLucky(amount)} LUCKY`;
+    const formatted = isIcp ? `${formatIcp(amount)} ICP` : `${formatLucky(amount)} PARLOR`;
     setWalletNotice(`Sent ${formatted}.`, "good");
   } catch (err) {
     setWalletNotice(err.message ?? String(err), "bad");
@@ -808,7 +843,7 @@ async function refreshStats() {
     if (els.burnTotalNum) els.burnTotalNum.textContent = totalBurned.toLocaleString();
 
     if (els.liveTicker) {
-      els.liveTicker.innerHTML = `<span>${totalBurned.toLocaleString()} LUCKY burned \u00B7 pool ${burnPool.toLocaleString()} LUCKY \u00B7 ${players} players \u00B7 ${tickets} tickets</span>`;
+      els.liveTicker.innerHTML = `<span>${totalBurned.toLocaleString()} PARLOR burned \u00B7 pool ${burnPool.toLocaleString()} PARLOR \u00B7 ${players} players \u00B7 ${tickets} tickets</span>`;
     }
 
     if (lastBurnEpoch > 0) {
@@ -842,13 +877,13 @@ async function refreshBalances() {
     const luckyFormatted = formatLucky(stakeInfo.liquid);
 
     // Staking page
-    els.totalStaked.textContent = `${formatLucky(stakeInfo.staked)} LUCKY`;
-    els.unlockableBalance.textContent = `${formatLucky(stakeInfo.unlockable)} LUCKY`;
-    els.lockedBalance.textContent = `${formatLucky(stakeInfo.locked)} LUCKY`;
+    els.totalStaked.textContent = `${formatLucky(stakeInfo.staked)} PARLOR`;
+    els.unlockableBalance.textContent = `${formatLucky(stakeInfo.unlockable)} PARLOR`;
+    els.lockedBalance.textContent = `${formatLucky(stakeInfo.locked)} PARLOR`;
     els.boostText.textContent = `${(Number(stakeInfo.boost_bps) / 10000).toFixed(2)}x`;
 
     // Staking page liquid
-    if (els.stakeLiquid) els.stakeLiquid.textContent = `${luckyFormatted} LUCKY`;
+    if (els.stakeLiquid) els.stakeLiquid.textContent = `${luckyFormatted} PARLOR`;
 
     // Wallet page
     els.walletIcp.textContent = `${formatIcp(icp)}`;
@@ -857,7 +892,7 @@ async function refreshBalances() {
     els.walletTotal.textContent = formatLucky(stakeInfo.total);
 
     // Status card on parlor
-    if (els.statusWallet) els.statusWallet.textContent = `${luckyFormatted} LUCKY`;
+    if (els.statusWallet) els.statusWallet.textContent = `${luckyFormatted} PARLOR`;
 
     // Tier track update
     updateTierTrack(Number(stakeInfo.staked) / 1e8);
@@ -1036,7 +1071,7 @@ function renderWinnerHistory(history) {
           </div>
           ${ignisLine}
         </div>
-        <div class="feed-prize">+${reward} <span style="font-size:0.74em; opacity:0.7">LUCKY</span></div>
+        <div class="feed-prize">+${reward} <span style="font-size:0.74em; opacity:0.7">PARLOR</span></div>
       </div>
     `;
   }).join("");
@@ -1078,10 +1113,29 @@ async function refreshActivity() {
         ts: Number(d.timestamp),
         icon: "\u2605",
         label: `Won round #${Number(d.round)}`,
-        detail: `+${formatLucky(d.reward_lucky_e8s)} LUCKY`,
+        detail: `+${formatLucky(d.reward_lucky_e8s)} PARLOR`,
         cls: "win",
       });
     }
+
+    // PARLOR token transfers
+    try {
+      const myAccount = { owner: principal, subaccount: [] };
+      const tokenTxs = await actors.token.get_transfer_log(myAccount);
+      for (const tx of tokenTxs) {
+        const fromOwner = tx.from?.owner ? principalToText(tx.from.owner) : "";
+        const toOwner = tx.to?.owner ? principalToText(tx.to.owner) : "";
+        const isSend = fromOwner === myText;
+        const other = isSend ? toOwner : fromOwner;
+        events.push({
+          ts: Number(tx.timestamp),
+          icon: isSend ? "\u2191" : "\u2193",
+          label: isSend ? "Sent PARLOR" : "Received PARLOR",
+          detail: `${formatLucky(tx.amount)} PARLOR${isSend ? " \u2192 " + other.slice(0, 7) + "..." : ""}`,
+          cls: isSend ? "send" : "receive",
+        });
+      }
+    } catch (_) {}
 
     // Stakes
     for (const b of batches) {
@@ -1089,7 +1143,7 @@ async function refreshActivity() {
         ts: Number(b.staked_at),
         icon: "\u26A1",
         label: "Staked",
-        detail: `${formatLucky(b.amount)} LUCKY`,
+        detail: `${formatLucky(b.amount)} PARLOR`,
         cls: "stake",
       });
     }
@@ -1270,7 +1324,7 @@ async function refreshIgnis() {
     }
     if (els.ignisHungerFill) els.ignisHungerFill.style.width = `${state.hunger}%`;
     if (els.ignisHungerText) els.ignisHungerText.textContent = `${state.hunger}%`;
-    if (els.ignisBurnTotal) els.ignisBurnTotal.textContent = `${(Number(state.total_burn_e8s) / 1e8).toLocaleString()} LUCKY`;
+    if (els.ignisBurnTotal) els.ignisBurnTotal.textContent = `${(Number(state.total_burn_e8s) / 1e8).toLocaleString()} PARLOR`;
     if (els.ignisArenaWins) els.ignisArenaWins.textContent = state.ignis_wins.toString();
 
     // Hunger bar color
@@ -1366,6 +1420,8 @@ function removeChatThinking() {
   if (thinking) thinking.remove();
 }
 
+let ignisRitualCorrectIndex = -1;
+
 async function ignisRequestRitual() {
   if (!actors?.ignis || !principal) return;
   els.ignisRitualRequestBtn.disabled = true;
@@ -1376,17 +1432,13 @@ async function ignisRequestRitual() {
     els.ignisRitualContent.hidden = true;
     els.ignisRitualResult.hidden = true;
     els.ignisRitualChallenge.hidden = false;
-    if ("Riddle" in challenge) {
-      els.ignisRitualQuestion.textContent = challenge.Riddle.question;
-      els.ignisRitualOptions.innerHTML = challenge.Riddle.options.map((opt, i) => `
-        <button class="ritual-option" data-choice="${i}">${escapeHtml(opt)}</button>
-      `).join("");
-    } else {
-      els.ignisRitualQuestion.textContent = challenge.Choice.prompt;
-      els.ignisRitualOptions.innerHTML = challenge.Choice.options.map((opt, i) => `
-        <button class="ritual-option" data-choice="${i}">${escapeHtml(opt)}</button>
-      `).join("");
-    }
+    const q = "Riddle" in challenge ? challenge.Riddle : challenge.Choice;
+    ignisRitualCorrectIndex = q.correct_index ?? -1;
+    els.ignisRitualQuestion.textContent = q.question || q.prompt;
+    const opts = q.options;
+    els.ignisRitualOptions.innerHTML = opts.map((opt, i) => `
+      <button class="ritual-option" data-choice="${i}">${escapeHtml(opt)}</button>
+    `).join("");
     els.ignisRitualOptions.querySelectorAll(".ritual-option").forEach(btn => {
       btn.addEventListener("click", () => ignisAttemptRitual(Number(btn.dataset.choice)));
     });
@@ -1399,23 +1451,21 @@ async function ignisRequestRitual() {
 async function ignisAttemptRitual(choice) {
   if (!actors?.ignis) return;
   els.ignisRitualOptions.querySelectorAll("button").forEach(b => b.disabled = true);
-  try {
-    const result = await actors.ignis.attempt_ritual(choice);
-    if ("Err" in result) { setNotice(result.Err, "bad"); return; }
-    const r = result.Ok;
-    els.ignisRitualChallenge.hidden = true;
-    els.ignisRitualResult.hidden = false;
-    els.ignisRitualResultText.textContent = r.ignis_response;
-    const boostPct = (Number(r.boost_bps) / 100).toFixed(1);
-    if (els.ignisRitualBoost) {
-      els.ignisRitualBoost.textContent = r.success
-        ? `Ritual passed! +${boostPct}% reward bonus.`
-        : `Ritual failed. +${boostPct}% consolation.`;
-      els.ignisRitualBoost.style.color = r.success ? "var(--cherry)" : "var(--plum)";
-    }
-  } catch (err) {
-    setNotice("Ritual failed.", "bad");
+  // Show result instantly using stored correct_index
+  const success = ignisRitualCorrectIndex >= 0 && choice === ignisRitualCorrectIndex;
+  els.ignisRitualChallenge.hidden = true;
+  els.ignisRitualResult.hidden = false;
+  els.ignisRitualResultText.textContent = success
+    ? "🔥 The flames accept your offering. Go forth with my blessing!"
+    : "💫 The flames flicker with disappointment. Perhaps next time, mortal.";
+  if (els.ignisRitualBoost) {
+    els.ignisRitualBoost.textContent = success
+      ? "Boost applied to your next win!"
+      : "Small consolation boost applied.";
+    els.ignisRitualBoost.style.color = success ? "var(--cherry)" : "var(--plum)";
   }
+  // Register boost in background
+  actors.ignis.attempt_ritual(choice).catch(() => {});
 }
 
 function ignisResetRitual() {
@@ -1426,6 +1476,8 @@ function ignisResetRitual() {
 }
 
 // Parlor ritual (duplicated for the mini card)
+let parlorRitualCorrectIndex = -1;
+
 async function parlorRequestRitual() {
   if (!actors?.ignis || !principal) return;
   els.parlorRitualRequestBtn.disabled = true;
@@ -1437,6 +1489,7 @@ async function parlorRequestRitual() {
     els.parlorRitualResult.hidden = true;
     els.parlorRitualChallenge.hidden = false;
     const q = "Riddle" in challenge ? challenge.Riddle : challenge.Choice;
+    parlorRitualCorrectIndex = q.correct_index ?? -1;
     els.parlorRitualQuestion.textContent = q.question || q.prompt;
     const opts = q.options;
     els.parlorRitualOptions.innerHTML = opts.map((opt, i) => `
@@ -1454,20 +1507,16 @@ async function parlorRequestRitual() {
 async function parlorAttemptRitual(choice) {
   if (!actors?.ignis) return;
   els.parlorRitualOptions.querySelectorAll("button").forEach(b => b.disabled = true);
-  try {
-    const result = await actors.ignis.attempt_ritual(choice);
-    if ("Err" in result) { setNotice(result.Err, "bad"); return; }
-    const r = result.Ok;
-    els.parlorRitualChallenge.hidden = true;
-    els.parlorRitualResult.hidden = false;
-    const boostPct = (Number(r.boost_bps) / 100).toFixed(1);
-    els.parlorRitualResultText.textContent = r.success
-      ? `Ignis is pleased. +${boostPct}% on your next win.`
-      : `Ignis tilts its head. Try tomorrow.`;
-    els.parlorRitualResultText.style.color = r.success ? "var(--cherry)" : "var(--plum)";
-  } catch (err) {
-    setNotice("Ritual failed.", "bad");
-  }
+  // Show result instantly using stored correct_index
+  const success = parlorRitualCorrectIndex >= 0 && choice === parlorRitualCorrectIndex;
+  els.parlorRitualChallenge.hidden = true;
+  els.parlorRitualResult.hidden = false;
+  els.parlorRitualResultText.textContent = success
+    ? "🔥 Ignis is pleased! Boost applied to your next win."
+    : "💫 Not quite right. Try another ritual!";
+  els.parlorRitualResultText.style.color = success ? "var(--cherry)" : "var(--plum)";
+  // Register boost in background
+  actors.ignis.attempt_ritual(choice).catch(() => {});
 }
 
 function parlorResetRitual() {
@@ -1541,7 +1590,7 @@ function showPhoenixWinnerReveal(draw) {
       <div class="reveal-result">
         <div class="reveal-prize">
           <span class="amount">${escapeHtml(reward)}</span>
-          <span class="unit">LUCKY</span>
+          <span class="unit">PARLOR</span>
         </div>
         <div class="reveal-winner">${escapeHtml(winnerFull)}</div>
         <div style="margin-top:0.3rem; font-size:0.82rem; color:var(--ink-soft)">
